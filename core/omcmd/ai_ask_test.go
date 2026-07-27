@@ -4,41 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"net/http"
 	"strings"
 	"testing"
 	"time"
 
 	clientai "github.com/opensvc/om3/v3/core/client/ai"
-	"github.com/opensvc/om3/v3/daemon/api"
 )
-
-type fakeAuthTokenClient struct {
-	token    string
-	status   int
-	duration string
-	err      error
-}
-
-func (c *fakeAuthTokenClient) PostAuthTokenWithResponse(_ context.Context, params *api.PostAuthTokenParams, _ ...api.RequestEditorFn) (*api.PostAuthTokenResponse, error) {
-	if c.err != nil {
-		return nil, c.err
-	}
-	if params.AccessDuration != nil {
-		c.duration = *params.AccessDuration
-	}
-	status := c.status
-	if status == 0 {
-		status = http.StatusOK
-	}
-	response := &api.PostAuthTokenResponse{
-		HTTPResponse: &http.Response{StatusCode: status},
-	}
-	if status == http.StatusOK {
-		response.JSON200 = &api.AuthToken{AccessToken: c.token}
-	}
-	return response, nil
-}
 
 type fakeAIAgentClient struct {
 	token       string

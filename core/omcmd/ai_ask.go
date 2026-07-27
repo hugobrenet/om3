@@ -5,28 +5,20 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/opensvc/om3/v3/core/client"
 	clientai "github.com/opensvc/om3/v3/core/client/ai"
-	"github.com/opensvc/om3/v3/daemon/api"
 )
 
 const (
 	DefaultAIAskTimeout = 10 * time.Minute
 	minimumAIAskTimeout = time.Second
 	maximumAIAskTimeout = 30 * time.Minute
-	tokenValidityMargin = time.Minute
 )
 
 var ErrCmdAIAsk = errors.New("command ai ask")
-
-type authTokenClient interface {
-	PostAuthTokenWithResponse(context.Context, *api.PostAuthTokenParams, ...api.RequestEditorFn) (*api.PostAuthTokenResponse, error)
-}
 
 type aiAgentClient interface {
 	Ask(context.Context, string, string, clientai.EmitFunc) (string, error)
@@ -38,7 +30,7 @@ type CmdAIAsk struct {
 	Out     io.Writer
 	ErrOut  io.Writer
 
-	newAuthTokenClient func() (authTokenClient, error)
+	newAuthTokenClient authTokenClientFactory
 	newAIAgentClient   func() (aiAgentClient, error)
 }
 
@@ -62,11 +54,6 @@ func (t *CmdAIAsk) run(parent context.Context) error {
 	if t.ErrOut == nil {
 		t.ErrOut = os.Stderr
 	}
-	if t.newAuthTokenClient == nil {
-		t.newAuthTokenClient = func() (authTokenClient, error) {
-			return client.New()
-		}
-	}
 	if t.newAIAgentClient == nil {
 		t.newAIAgentClient = func() (aiAgentClient, error) {
 			return clientai.New()
@@ -75,24 +62,9 @@ func (t *CmdAIAsk) run(parent context.Context) error {
 
 	ctx, cancel := context.WithTimeout(parent, t.Timeout)
 	defer cancel()
-	tokenClient, err := t.newAuthTokenClient()
+	token, err := issueAIAccessToken(ctx, t.Timeout, t.newAuthTokenClient)
 	if err != nil {
-		return fmt.Errorf("create local daemon client: %w", err)
-	}
-	tokenDuration := (t.Timeout + tokenValidityMargin).String()
-	tokenResponse, err := tokenClient.PostAuthTokenWithResponse(ctx, &api.PostAuthTokenParams{AccessDuration: &tokenDuration})
-	if err != nil {
-		return fmt.Errorf("create AI access token: %w", err)
-	}
-	if tokenResponse == nil {
-		return fmt.Errorf("create AI access token: daemon returned an empty response")
-	}
-	if tokenResponse.StatusCode() != http.StatusOK || tokenResponse.JSON200 == nil {
-		return fmt.Errorf("create AI access token: daemon returned HTTP %d", tokenResponse.StatusCode())
-	}
-	token := tokenResponse.JSON200.AccessToken
-	if token == "" {
-		return fmt.Errorf("create AI access token: daemon returned an empty token")
+		return err
 	}
 	agentClient, err := t.newAIAgentClient()
 	if err != nil {
