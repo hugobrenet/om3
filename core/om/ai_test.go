@@ -20,12 +20,36 @@ func TestAICommandHelpDocumentsSubcommands(t *testing.T) {
 		t.Fatalf("execute help: %v", err)
 	}
 	for _, expected := range []string{
-		"ask", "list", "show", "delete", "metadata only",
-		"OPENSVC_AI_AGENT_URL", "om ai show CONVERSATION_ID",
+		"ask", "chat", "list", "show", "delete", "metadata only",
+		"OPENSVC_AI_AGENT_URL", "om ai chat CONVERSATION_ID", "om ai show CONVERSATION_ID",
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Fatalf("help output does not contain %q:\n%s", expected, output.String())
 		}
+	}
+}
+
+func TestAIChatCommandContract(t *testing.T) {
+	cmd := newCmdAIChat()
+	if cmd.Use != "chat [CONVERSATION_ID]" {
+		t.Fatalf("Use = %q", cmd.Use)
+	}
+	for _, args := range [][]string{nil, {"conversation-id"}} {
+		if err := cmd.Args(cmd, args); err != nil {
+			t.Fatalf("command rejected args %#v: %v", args, err)
+		}
+	}
+	if err := cmd.Args(cmd, []string{"first", "second"}); err == nil {
+		t.Fatal("command accepted more than one conversation ID")
+	}
+	if cmd.Flag("agent-url") != nil {
+		t.Fatal("agent-url flag is exposed")
+	}
+	if cmd.Flag("output") != nil {
+		t.Fatal("output flag is exposed")
+	}
+	if got, err := time.ParseDuration(cmd.Flag("timeout").Value.String()); err != nil || got != omcmd.DefaultAIChatTurnTimeout {
+		t.Fatalf("timeout default = %q, %v", cmd.Flag("timeout").Value.String(), err)
 	}
 }
 

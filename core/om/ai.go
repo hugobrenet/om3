@@ -24,12 +24,16 @@ func newCmdAI() *cobra.Command {
 
 The ask command submits one non-persistent prompt. The list, show, and delete
 commands manage persistent conversations owned by the authenticated OpenSVC
-identity. The show command returns conversation metadata only; conversation
-messages are not exposed by the agent API. Conversations expire automatically.
+identity. The chat command creates or resumes an interactive persistent
+conversation. The show command returns conversation metadata only;
+conversation messages are not exposed by the agent API. Conversations expire
+automatically.
 
 The agent is local to the node. OPENSVC_AI_AGENT_URL can override its default
 loopback URL for local development or non-default local deployments.`,
 		Example: `  om ai ask "Assess the health of my cluster"
+  om ai chat
+  om ai chat CONVERSATION_ID
   om ai list
   om ai list --output json
   om ai show CONVERSATION_ID
@@ -37,10 +41,38 @@ loopback URL for local development or non-default local deployments.`,
 	}
 	cmd.AddCommand(
 		newCmdAIAsk(),
+		newCmdAIChat(),
 		newCmdAIList(),
 		newCmdAIShow(),
 		newCmdAIDelete(),
 	)
+	return cmd
+}
+
+func newCmdAIChat() *cobra.Command {
+	options := omcmd.CmdAIChat{
+		Timeout: omcmd.DefaultAIChatTurnTimeout,
+	}
+	cmd := &cobra.Command{
+		Use:   "chat [CONVERSATION_ID]",
+		Short: "start or resume a persistent AI conversation",
+		Long: `Start a persistent interactive AI conversation or resume an owned one.
+
+Each prompt obtains a fresh short-lived OpenSVC access token. Ctrl+C cancels
+only the active turn. Enter exit or quit, or send EOF, to end the session.`,
+		Args: cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			options.ID = ""
+			if len(args) == 1 {
+				options.ID = args[0]
+			}
+			options.In = cmd.InOrStdin()
+			options.Out = cmd.OutOrStdout()
+			options.ErrOut = cmd.ErrOrStderr()
+			return runAIChatCommand(cmd, &options)
+		},
+	}
+	cmd.Flags().DurationVar(&options.Timeout, "timeout", omcmd.DefaultAIChatTurnTimeout, "maximum duration for each conversation turn")
 	return cmd
 }
 
@@ -131,4 +163,31 @@ func runAICommand(cmd *cobra.Command, run func(context.Context) error) error {
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return run(ctx)
+}
+
+func runAIChatCommand(cmd *cobra.Command, options *omcmd.CmdAIChat) error {
+	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGTERM)
+	defer stop()
+
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt)
+	defer signal.Stop(signals)
+	interrupts := make(chan struct{}, 1)
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		for {
+			select {
+			case <-signals:
+				select {
+				case interrupts <- struct{}{}:
+				default:
+				}
+			case <-done:
+				return
+			}
+		}
+	}()
+	options.Interrupt = interrupts
+	return options.Run(ctx)
 }
