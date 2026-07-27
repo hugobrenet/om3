@@ -76,18 +76,14 @@ func TestCmdAIAskGetsTokenAndStreamsAgentResponse(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	command := &CmdAIAsk{
-		AgentURL: "http://127.0.0.1:8090/v1/ask",
-		Prompt:   "health of my cluster",
-		Timeout:  2 * time.Second,
-		Out:      &stdout,
-		ErrOut:   &stderr,
+		Prompt:  "health of my cluster",
+		Timeout: 2 * time.Second,
+		Out:     &stdout,
+		ErrOut:  &stderr,
 		newAuthTokenClient: func() (authTokenClient, error) {
 			return tokenClient, nil
 		},
-		newAIAgentClient: func(endpoint string) (aiAgentClient, error) {
-			if endpoint != "http://127.0.0.1:8090/v1/ask" {
-				t.Fatalf("endpoint = %q", endpoint)
-			}
+		newAIAgentClient: func() (aiAgentClient, error) {
 			return agentClient, nil
 		},
 	}
@@ -140,7 +136,7 @@ func TestCmdAIAskPropagatesSafeFailures(t *testing.T) {
 				newAuthTokenClient: func() (authTokenClient, error) {
 					return &fakeAuthTokenClient{token: "token"}, nil
 				},
-				newAIAgentClient: func(string) (aiAgentClient, error) {
+				newAIAgentClient: func() (aiAgentClient, error) {
 					return &fakeAIAgentClient{err: target}, nil
 				},
 			},

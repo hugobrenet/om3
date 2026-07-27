@@ -11,12 +11,15 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"unicode"
 )
 
 const (
-	DefaultEndpoint         = "http://127.0.0.1:8090/v1/ask"
+	defaultBaseURL          = "http://127.0.0.1:8090"
+	baseURLEnv              = "OPENSVC_AI_AGENT_URL"
+	askPath                 = "/v1/ask"
 	maxPromptBytes          = 32 << 10
 	maxErrorBodyBytes       = 64 << 10
 	maxStreamBytes          = 16 << 20
@@ -28,7 +31,7 @@ const (
 )
 
 type Client struct {
-	endpoint   string
+	baseURL    *url.URL
 	httpClient *http.Client
 }
 
@@ -93,26 +96,33 @@ func (e *StreamError) Error() string {
 	return message
 }
 
-func New(endpoint string, httpClient *http.Client) (*Client, error) {
-	parsed, err := url.Parse(endpoint)
+func New() (*Client, error) {
+	baseURL := strings.TrimSpace(os.Getenv(baseURLEnv))
+	if baseURL == "" {
+		baseURL = defaultBaseURL
+	}
+	return newClient(baseURL, nil)
+}
+
+func newClient(baseURL string, httpClient *http.Client) (*Client, error) {
+	parsed, err := url.Parse(baseURL)
 	if err != nil {
-		return nil, fmt.Errorf("parse ai agent endpoint: %w", err)
+		return nil, fmt.Errorf("parse ai agent base URL: %w", err)
 	}
 	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return nil, fmt.Errorf("ai agent endpoint scheme must be http or https")
+		return nil, fmt.Errorf("ai agent base URL scheme must be http or https")
 	}
 	if parsed.Host == "" {
-		return nil, fmt.Errorf("ai agent endpoint host is empty")
+		return nil, fmt.Errorf("ai agent base URL host is empty")
 	}
-	if parsed.Path != "/v1/ask" || parsed.RawPath != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.User != nil {
-		return nil, fmt.Errorf("ai agent endpoint must end with the exact /v1/ask path and contain no credentials, query, or fragment")
+	if (parsed.Path != "" && parsed.Path != "/") || parsed.RawPath != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.User != nil {
+		return nil, fmt.Errorf("ai agent base URL must not contain a path, credentials, query, or fragment")
 	}
-	if parsed.Scheme == "http" {
-		ip := net.ParseIP(parsed.Hostname())
-		if ip == nil || !ip.IsLoopback() {
-			return nil, fmt.Errorf("plain HTTP ai agent endpoint must use a loopback IP")
-		}
+	ip := net.ParseIP(parsed.Hostname())
+	if ip == nil || !ip.IsLoopback() {
+		return nil, fmt.Errorf("ai agent base URL must use a loopback IP")
 	}
+	parsed.Path = ""
 	if httpClient == nil {
 		httpClient = &http.Client{}
 	} else {
@@ -122,7 +132,13 @@ func New(endpoint string, httpClient *http.Client) (*Client, error) {
 	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}
-	return &Client{endpoint: parsed.String(), httpClient: httpClient}, nil
+	return &Client{baseURL: parsed, httpClient: httpClient}, nil
+}
+
+func (c *Client) endpoint(path string) string {
+	endpoint := *c.baseURL
+	endpoint.Path = path
+	return endpoint.String()
 }
 
 func (c *Client) Ask(ctx context.Context, token string, prompt string, emit EmitFunc) (string, error) {
@@ -144,7 +160,7 @@ func (c *Client) Ask(ctx context.Context, token string, prompt string, emit Emit
 	if err != nil {
 		return "", fmt.Errorf("encode ai agent request: %w", err)
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint, bytes.NewReader(body))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.endpoint(askPath), bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("create ai agent request: %w", err)
 	}

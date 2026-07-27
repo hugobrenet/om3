@@ -33,14 +33,13 @@ type aiAgentClient interface {
 }
 
 type CmdAIAsk struct {
-	AgentURL string
-	Prompt   string
-	Timeout  time.Duration
-	Out      io.Writer
-	ErrOut   io.Writer
+	Prompt  string
+	Timeout time.Duration
+	Out     io.Writer
+	ErrOut  io.Writer
 
 	newAuthTokenClient func() (authTokenClient, error)
-	newAIAgentClient   func(string) (aiAgentClient, error)
+	newAIAgentClient   func() (aiAgentClient, error)
 }
 
 func (t *CmdAIAsk) Run(ctx context.Context) error {
@@ -57,9 +56,6 @@ func (t *CmdAIAsk) run(parent context.Context) error {
 	if t.Timeout < minimumAIAskTimeout || t.Timeout > maximumAIAskTimeout {
 		return fmt.Errorf("timeout must be between %s and %s", minimumAIAskTimeout, maximumAIAskTimeout)
 	}
-	if t.AgentURL == "" {
-		t.AgentURL = clientai.DefaultEndpoint
-	}
 	if t.Out == nil {
 		t.Out = os.Stdout
 	}
@@ -72,8 +68,8 @@ func (t *CmdAIAsk) run(parent context.Context) error {
 		}
 	}
 	if t.newAIAgentClient == nil {
-		t.newAIAgentClient = func(endpoint string) (aiAgentClient, error) {
-			return clientai.New(endpoint, nil)
+		t.newAIAgentClient = func() (aiAgentClient, error) {
+			return clientai.New()
 		}
 	}
 
@@ -98,7 +94,7 @@ func (t *CmdAIAsk) run(parent context.Context) error {
 	if token == "" {
 		return fmt.Errorf("create AI access token: daemon returned an empty token")
 	}
-	agentClient, err := t.newAIAgentClient(t.AgentURL)
+	agentClient, err := t.newAIAgentClient()
 	if err != nil {
 		return fmt.Errorf("create AI agent client: %w", err)
 	}

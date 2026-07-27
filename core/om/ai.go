@@ -6,7 +6,6 @@ import (
 	"strings"
 	"syscall"
 
-	clientai "github.com/opensvc/om3/v3/core/client/ai"
 	"github.com/opensvc/om3/v3/core/omcmd"
 	"github.com/spf13/cobra"
 )
@@ -22,8 +21,7 @@ func init() {
 
 func newCmdAIAsk() *cobra.Command {
 	options := omcmd.CmdAIAsk{
-		AgentURL: clientai.DefaultEndpoint,
-		Timeout:  omcmd.DefaultAIAskTimeout,
+		Timeout: omcmd.DefaultAIAskTimeout,
 	}
 	cmd := &cobra.Command{
 		Use:   "ask PROMPT",
@@ -37,7 +35,6 @@ func newCmdAIAsk() *cobra.Command {
 		},
 	}
 	flags := cmd.Flags()
-	flags.StringVar(&options.AgentURL, "agent-url", clientai.DefaultEndpoint, "opensvc ai agent ask endpoint")
 	flags.DurationVar(&options.Timeout, "timeout", omcmd.DefaultAIAskTimeout, "maximum duration for the complete AI request")
 	return cmd
 }
