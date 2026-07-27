@@ -44,6 +44,82 @@ func TestClientListsConversations(t *testing.T) {
 	}
 }
 
+func TestClientCreatesConversation(t *testing.T) {
+	item := testConversation("conversation-1")
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost || request.URL.Path != conversationsPath {
+			t.Errorf("request = %s %s", request.Method, request.URL.Path)
+		}
+		if got := request.Header.Get("Authorization"); got != "Bearer token" {
+			t.Errorf("Authorization = %q", got)
+		}
+		if got := request.Header.Get("Accept"); got != "application/json" {
+			t.Errorf("Accept = %q", got)
+		}
+		if request.ContentLength != 0 {
+			t.Errorf("Content-Length = %d", request.ContentLength)
+		}
+		response.Header().Set("Content-Type", "application/json")
+		response.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(response).Encode(conversationEnvelope{Conversation: item})
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := newClient(server.URL, server.Client())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	got, err := client.CreateConversation(t.Context(), "token")
+	if err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	if got != item {
+		t.Fatalf("conversation = %#v, want %#v", got, item)
+	}
+}
+
+func TestClientSendsConversationTurn(t *testing.T) {
+	const id = "conversation-1"
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPost || request.URL.Path != conversationTurnPath(id) {
+			t.Errorf("request = %s %s", request.Method, request.URL.Path)
+		}
+		if got := request.Header.Get("Authorization"); got != "Bearer turn-token" {
+			t.Errorf("Authorization = %q", got)
+		}
+		var body struct {
+			Prompt string `json:"prompt"`
+		}
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		if body.Prompt != "continue assessment" {
+			t.Errorf("prompt = %q", body.Prompt)
+		}
+		response.Header().Set("Content-Type", "text/event-stream")
+		response.Header().Set(requestIDResponseHeader, "request-turn")
+		_, _ = fmt.Fprint(response, "event: text_delta\ndata: {\"type\":\"text_delta\",\"iteration\":1,\"text_delta\":\"continuing\"}\n\n")
+		_, _ = fmt.Fprint(response, "event: completed\ndata: {\"type\":\"completed\",\"iteration\":1,\"finish_reason\":\"completed\"}\n\n")
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := newClient(server.URL, server.Client())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	var events []Event
+	requestID, err := client.SendConversationTurn(t.Context(), "turn-token", id, "continue assessment", func(event Event) error {
+		events = append(events, event)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("send conversation turn: %v", err)
+	}
+	if requestID != "request-turn" || len(events) != 2 || events[0].TextDelta != "continuing" || events[1].Type != "completed" {
+		t.Fatalf("request ID = %q, events = %#v", requestID, events)
+	}
+}
+
 func TestClientGetsAndDeletesConversation(t *testing.T) {
 	const id = "conversation-1"
 	item := testConversation(id)
@@ -107,12 +183,18 @@ func TestConversationMethodsRejectInvalidInputBeforeRequest(t *testing.T) {
 	if _, err := client.ListConversations(t.Context(), " "); err == nil {
 		t.Fatal("list accepted an empty token")
 	}
+	if _, err := client.CreateConversation(t.Context(), " "); err == nil {
+		t.Fatal("create accepted an empty token")
+	}
 	for _, id := range []string{"", "bad/id", "bad id", strings.Repeat("a", maxConversationIDBytes+1)} {
 		if _, err := client.GetConversation(t.Context(), "token", id); err == nil {
 			t.Errorf("get accepted ID %q", id)
 		}
 		if err := client.DeleteConversation(t.Context(), "token", id); err == nil {
 			t.Errorf("delete accepted ID %q", id)
+		}
+		if _, err := client.SendConversationTurn(t.Context(), "token", id, "prompt", func(Event) error { return nil }); err == nil {
+			t.Errorf("turn accepted ID %q", id)
 		}
 	}
 	if calls.Load() != 0 {

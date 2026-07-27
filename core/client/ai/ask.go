@@ -61,6 +61,10 @@ func (e *StreamError) Error() string {
 }
 
 func (c *Client) Ask(ctx context.Context, token string, prompt string, emit EmitFunc) (string, error) {
+	return c.streamPrompt(ctx, askPath, token, prompt, emit)
+}
+
+func (c *Client) streamPrompt(ctx context.Context, path string, token string, prompt string, emit EmitFunc) (string, error) {
 	if strings.TrimSpace(prompt) == "" {
 		return "", fmt.Errorf("ai agent prompt is empty")
 	}
@@ -76,7 +80,7 @@ func (c *Client) Ask(ctx context.Context, token string, prompt string, emit Emit
 	if err != nil {
 		return "", fmt.Errorf("encode ai agent request: %w", err)
 	}
-	request, err := c.newAuthenticatedRequest(ctx, http.MethodPost, askPath, token, bytes.NewReader(body))
+	request, err := c.newAuthenticatedRequest(ctx, http.MethodPost, path, token, bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}

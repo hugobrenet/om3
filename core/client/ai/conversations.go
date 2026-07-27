@@ -34,9 +34,20 @@ type conversationListEnvelope struct {
 	Conversations []Conversation `json:"conversations"`
 }
 
+func (c *Client) CreateConversation(ctx context.Context, token string) (Conversation, error) {
+	var payload conversationEnvelope
+	if err := c.doJSON(ctx, http.MethodPost, conversationsPath, token, http.StatusCreated, &payload); err != nil {
+		return Conversation{}, err
+	}
+	if err := validateConversation(payload.Conversation); err != nil {
+		return Conversation{}, fmt.Errorf("validate ai agent conversation: %w", err)
+	}
+	return payload.Conversation, nil
+}
+
 func (c *Client) ListConversations(ctx context.Context, token string) ([]Conversation, error) {
 	var payload conversationListEnvelope
-	if err := c.getJSON(ctx, conversationsPath, token, &payload); err != nil {
+	if err := c.doJSON(ctx, http.MethodGet, conversationsPath, token, http.StatusOK, &payload); err != nil {
 		return nil, err
 	}
 	if len(payload.Conversations) > maxConversationListItems {
@@ -63,7 +74,7 @@ func (c *Client) GetConversation(ctx context.Context, token string, id string) (
 		return Conversation{}, err
 	}
 	var payload conversationEnvelope
-	if err := c.getJSON(ctx, conversationPath(id), token, &payload); err != nil {
+	if err := c.doJSON(ctx, http.MethodGet, conversationPath(id), token, http.StatusOK, &payload); err != nil {
 		return Conversation{}, err
 	}
 	if err := validateConversation(payload.Conversation); err != nil {
@@ -95,8 +106,15 @@ func (c *Client) DeleteConversation(ctx context.Context, token string, id string
 	return nil
 }
 
-func (c *Client) getJSON(ctx context.Context, path string, token string, target any) error {
-	request, err := c.newAuthenticatedRequest(ctx, http.MethodGet, path, token, nil)
+func (c *Client) SendConversationTurn(ctx context.Context, token string, id string, prompt string, emit EmitFunc) (string, error) {
+	if err := validateConversationID(id); err != nil {
+		return "", err
+	}
+	return c.streamPrompt(ctx, conversationTurnPath(id), token, prompt, emit)
+}
+
+func (c *Client) doJSON(ctx context.Context, method string, path string, token string, expectedStatus int, target any) error {
+	request, err := c.newAuthenticatedRequest(ctx, method, path, token, nil)
 	if err != nil {
 		return err
 	}
@@ -107,7 +125,7 @@ func (c *Client) getJSON(ctx context.Context, path string, token string, target 
 	}
 	defer response.Body.Close()
 	requestID := response.Header.Get(requestIDResponseHeader)
-	if response.StatusCode != http.StatusOK {
+	if response.StatusCode != expectedStatus {
 		return decodeAPIError(response, requestID, token)
 	}
 	mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
@@ -137,6 +155,10 @@ func (c *Client) getJSON(ctx context.Context, path string, token string, target 
 
 func conversationPath(id string) string {
 	return conversationsPath + "/" + id
+}
+
+func conversationTurnPath(id string) string {
+	return conversationPath(id) + "/turns"
 }
 
 func validateConversation(conversation Conversation) error {
