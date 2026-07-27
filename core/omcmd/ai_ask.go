@@ -14,8 +14,6 @@ import (
 
 const (
 	DefaultAIAskTimeout = 10 * time.Minute
-	minimumAIAskTimeout = time.Second
-	maximumAIAskTimeout = 30 * time.Minute
 )
 
 var ErrCmdAIAsk = errors.New("command ai ask")
@@ -45,8 +43,8 @@ func (t *CmdAIAsk) run(parent context.Context) error {
 	if strings.TrimSpace(t.Prompt) == "" {
 		return fmt.Errorf("prompt is empty")
 	}
-	if t.Timeout < minimumAIAskTimeout || t.Timeout > maximumAIAskTimeout {
-		return fmt.Errorf("timeout must be between %s and %s", minimumAIAskTimeout, maximumAIAskTimeout)
+	if err := validateAITurnTimeout(t.Timeout); err != nil {
+		return err
 	}
 	if t.Out == nil {
 		t.Out = os.Stdout
@@ -71,30 +69,9 @@ func (t *CmdAIAsk) run(parent context.Context) error {
 		return fmt.Errorf("create AI agent client: %w", err)
 	}
 
-	printedText := false
-	_, err = agentClient.Ask(ctx, token, t.Prompt, func(event clientai.Event) error {
-		switch event.Type {
-		case "text_delta":
-			printedText = true
-			if _, err := io.WriteString(t.Out, event.TextDelta); err != nil {
-				return fmt.Errorf("write AI response: %w", err)
-			}
-		case "tool_started":
-			if _, err := fmt.Fprintf(t.ErrOut, "[tool] %s\n", event.ToolName); err != nil {
-				return fmt.Errorf("write AI tool progress: %w", err)
-			}
-		case "tool_finished":
-			if event.ToolError != nil && *event.ToolError {
-				if _, err := fmt.Fprintf(t.ErrOut, "[tool] %s failed\n", event.ToolName); err != nil {
-					return fmt.Errorf("write AI tool progress: %w", err)
-				}
-			}
-		}
-		return nil
-	})
-	if printedText {
-		_, _ = fmt.Fprintln(t.Out)
-	}
+	stream := newAIStreamWriter(t.Out, t.ErrOut)
+	_, err = agentClient.Ask(ctx, token, t.Prompt, stream.emit)
+	stream.finish()
 	if err != nil {
 		return err
 	}
