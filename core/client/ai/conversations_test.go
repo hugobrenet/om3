@@ -120,6 +120,48 @@ func TestClientSendsConversationTurn(t *testing.T) {
 	}
 }
 
+func TestClientUpdatesConversationTitle(t *testing.T) {
+	const id = "conversation-1"
+	item := testConversation(id)
+	item.Title = "Renamed conversation"
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodPatch || request.URL.Path != conversationPath(id) {
+			t.Errorf("request = %s %s", request.Method, request.URL.Path)
+		}
+		if got := request.Header.Get("Authorization"); got != "Bearer token" {
+			t.Errorf("Authorization = %q", got)
+		}
+		if got := request.Header.Get("Accept"); got != "application/json" {
+			t.Errorf("Accept = %q", got)
+		}
+		if got := request.Header.Get("Content-Type"); got != "application/json" {
+			t.Errorf("Content-Type = %q", got)
+		}
+		var body conversationTitleRequest
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		if body.Title != item.Title {
+			t.Errorf("title = %q", body.Title)
+		}
+		response.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(response).Encode(conversationEnvelope{Conversation: item})
+	}))
+	t.Cleanup(server.Close)
+
+	client, err := newClient(server.URL, server.Client())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	got, err := client.UpdateConversationTitle(t.Context(), "token", id, "  Renamed\nconversation  ")
+	if err != nil {
+		t.Fatalf("update conversation title: %v", err)
+	}
+	if got != item {
+		t.Fatalf("conversation = %#v, want %#v", got, item)
+	}
+}
+
 func TestClientGetsAndDeletesConversation(t *testing.T) {
 	const id = "conversation-1"
 	item := testConversation(id)
@@ -186,6 +228,11 @@ func TestConversationMethodsRejectInvalidInputBeforeRequest(t *testing.T) {
 	if _, err := client.CreateConversation(t.Context(), " "); err == nil {
 		t.Fatal("create accepted an empty token")
 	}
+	for _, title := range []string{" \n ", strings.Repeat("a", maxConversationTitleRunes+1)} {
+		if _, err := client.UpdateConversationTitle(t.Context(), "token", "conversation-1", title); err == nil {
+			t.Errorf("update accepted title %q", title)
+		}
+	}
 	for _, id := range []string{"", "bad/id", "bad id", strings.Repeat("a", maxConversationIDBytes+1)} {
 		if _, err := client.GetConversation(t.Context(), "token", id); err == nil {
 			t.Errorf("get accepted ID %q", id)
@@ -195,6 +242,9 @@ func TestConversationMethodsRejectInvalidInputBeforeRequest(t *testing.T) {
 		}
 		if _, err := client.SendConversationTurn(t.Context(), "token", id, "prompt", func(Event) error { return nil }); err == nil {
 			t.Errorf("turn accepted ID %q", id)
+		}
+		if _, err := client.UpdateConversationTitle(t.Context(), "token", id, "valid"); err == nil {
+			t.Errorf("update accepted ID %q", id)
 		}
 	}
 	if calls.Load() != 0 {
@@ -226,10 +276,15 @@ func TestConversationMethodsReturnSanitizedAPIErrors(t *testing.T) {
 	if err := client.DeleteConversation(t.Context(), token, "conversation-1"); err == nil || strings.Contains(err.Error(), token) {
 		t.Fatalf("delete error = %v", err)
 	}
+	if _, err := client.UpdateConversationTitle(t.Context(), token, "conversation-1", "valid"); err == nil || strings.Contains(err.Error(), token) {
+		t.Fatalf("update error = %v", err)
+	}
 }
 
 func TestClientRejectsInvalidConversationResponses(t *testing.T) {
 	valid := testConversation("conversation-1")
+	invalidTitle := valid
+	invalidTitle.Title = " not normalized "
 	tests := []struct {
 		name        string
 		contentType string
@@ -239,6 +294,7 @@ func TestClientRejectsInvalidConversationResponses(t *testing.T) {
 		{name: "malformed JSON", contentType: "application/json", body: `{"conversations":`},
 		{name: "multiple JSON values", contentType: "application/json", body: `{"conversations":[]} {}`},
 		{name: "invalid metadata", contentType: "application/json", body: `{"conversations":[{"id":"conversation-1","stored_bytes":0}]}`},
+		{name: "invalid title", contentType: "application/json", body: mustJSON(t, conversationListEnvelope{Conversations: []Conversation{invalidTitle}})},
 		{name: "duplicate IDs", contentType: "application/json", body: mustJSON(t, conversationListEnvelope{Conversations: []Conversation{valid, valid}})},
 		{name: "oversized", contentType: "application/json", body: `{"conversations":[]}` + strings.Repeat(" ", maxConversationResponseBodyBytes)},
 	}
@@ -276,10 +332,27 @@ func TestClientRejectsMismatchedConversationID(t *testing.T) {
 	}
 }
 
+func TestClientRejectsMismatchedConversationTitle(t *testing.T) {
+	item := testConversation("conversation-1")
+	item.Title = "Different title"
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(response).Encode(conversationEnvelope{Conversation: item})
+	}))
+	t.Cleanup(server.Close)
+	client, err := newClient(server.URL, server.Client())
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	if _, err := client.UpdateConversationTitle(t.Context(), "token", item.ID, "Expected title"); err == nil {
+		t.Fatal("mismatched conversation title succeeded")
+	}
+}
+
 func testConversation(id string) Conversation {
 	createdAt := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
 	return Conversation{
-		ID: id, CreatedAt: createdAt, UpdatedAt: createdAt.Add(time.Minute),
+		ID: id, Title: "Cluster health", CreatedAt: createdAt, UpdatedAt: createdAt.Add(time.Minute),
 		ExpiresAt: createdAt.Add(7 * 24 * time.Hour), StoredBytes: 1024,
 	}
 }
