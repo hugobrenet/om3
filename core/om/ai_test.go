@@ -48,6 +48,9 @@ func TestAIChatCommandContract(t *testing.T) {
 	if cmd.Flag("output") != nil {
 		t.Fatal("output flag is exposed")
 	}
+	if cmd.Flag("resume") == nil || cmd.Flag("resume").Value.String() != "false" {
+		t.Fatalf("resume flag = %#v", cmd.Flag("resume"))
+	}
 	if got, err := time.ParseDuration(cmd.Flag("timeout").Value.String()); err != nil || got != omcmd.DefaultAIChatTurnTimeout {
 		t.Fatalf("timeout default = %q, %v", cmd.Flag("timeout").Value.String(), err)
 	}

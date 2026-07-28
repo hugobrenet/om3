@@ -13,14 +13,16 @@ import (
 )
 
 type fakeAIChatClient struct {
-	conversation clientai.Conversation
-	createToken  string
-	getToken     string
-	getID        string
-	turnTokens   []string
-	turnPrompts  []string
-	turn         func(context.Context, clientai.EmitFunc) error
-	err          error
+	conversation  clientai.Conversation
+	conversations []clientai.Conversation
+	createToken   string
+	getToken      string
+	listToken     string
+	getID         string
+	turnTokens    []string
+	turnPrompts   []string
+	turn          func(context.Context, clientai.EmitFunc) error
+	err           error
 }
 
 func (c *fakeAIChatClient) CreateConversation(_ context.Context, token string) (clientai.Conversation, error) {
@@ -38,6 +40,14 @@ func (c *fakeAIChatClient) GetConversation(_ context.Context, token string, id s
 		return clientai.Conversation{}, c.err
 	}
 	return c.conversation, nil
+}
+
+func (c *fakeAIChatClient) ListConversations(_ context.Context, token string) ([]clientai.Conversation, error) {
+	c.listToken = token
+	if c.err != nil {
+		return nil, c.err
+	}
+	return c.conversations, nil
 }
 
 func (c *fakeAIChatClient) SendConversationTurn(ctx context.Context, token string, _ string, prompt string, emit clientai.EmitFunc) (string, error) {
@@ -141,6 +151,100 @@ func TestCmdAIChatResumesConversationAndExitsOnEOF(t *testing.T) {
 	}
 }
 
+func TestCmdAIChatSelectsConversationToResume(t *testing.T) {
+	now := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
+	latest := chatTestConversation("11111111aaaaaaaa")
+	latest.Title = "Redis availability"
+	latest.UpdatedAt = now.Add(-2 * time.Minute)
+	older := chatTestConversation("22222222bbbbbbbb")
+	older.Title = "Cluster health review"
+	older.UpdatedAt = now.Add(-3 * 24 * time.Hour)
+	for _, test := range []struct {
+		name        string
+		input       string
+		selected    clientai.Conversation
+		wantInvalid bool
+	}{
+		{name: "default latest", input: "\nexit\n", selected: latest},
+		{name: "number after invalid", input: "invalid\n9\n2\nexit\n", selected: older, wantInvalid: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tokenCalls := 0
+			client := &fakeAIChatClient{
+				conversation:  test.selected,
+				conversations: []clientai.Conversation{latest, older},
+			}
+			var stderr bytes.Buffer
+			command := &CmdAIChat{
+				Resume:  true,
+				Timeout: time.Second,
+				In:      strings.NewReader(test.input),
+				Out:     &bytes.Buffer{},
+				ErrOut:  &stderr,
+				now:     func() time.Time { return now },
+				newAuthTokenClient: func() (authTokenClient, error) {
+					tokenCalls++
+					return &fakeAuthTokenClient{token: fmt.Sprintf("token-%d", tokenCalls)}, nil
+				},
+				newAIChatClient: func() (aiChatClient, error) {
+					return client, nil
+				},
+			}
+			if err := command.Run(t.Context()); err != nil {
+				t.Fatalf("run command: %v", err)
+			}
+			if client.listToken != "token-1" || client.getToken != "token-2" || client.getID != test.selected.ID || client.createToken != "" || tokenCalls != 2 {
+				t.Fatalf("list token=%q get token=%q get ID=%q create token=%q token calls=%d", client.listToken, client.getToken, client.getID, client.createToken, tokenCalls)
+			}
+			for _, expected := range []string{
+				"Select a conversation:", "Redis availability", "2 minutes ago", "11111111",
+				"Cluster health review", "3 days ago", "22222222", "Conversation [1]:",
+			} {
+				if !strings.Contains(stderr.String(), expected) {
+					t.Fatalf("stderr = %q, want containing %q", stderr.String(), expected)
+				}
+			}
+			if got := strings.Contains(stderr.String(), "Invalid selection."); got != test.wantInvalid {
+				t.Fatalf("invalid selection output=%t, want %t: %q", got, test.wantInvalid, stderr.String())
+			}
+		})
+	}
+}
+
+func TestCmdAIChatExitsConversationSelector(t *testing.T) {
+	conversation := chatTestConversation("conversation-1")
+	for _, test := range []struct {
+		name  string
+		input string
+	}{
+		{name: "EOF"},
+		{name: "quit", input: "quit\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := &fakeAIChatClient{conversations: []clientai.Conversation{conversation}}
+			command := &CmdAIChat{
+				Resume:  true,
+				Timeout: time.Second,
+				In:      strings.NewReader(test.input),
+				Out:     &bytes.Buffer{},
+				ErrOut:  &bytes.Buffer{},
+				newAuthTokenClient: func() (authTokenClient, error) {
+					return &fakeAuthTokenClient{token: "token"}, nil
+				},
+				newAIChatClient: func() (aiChatClient, error) {
+					return client, nil
+				},
+			}
+			if err := command.Run(t.Context()); err != nil {
+				t.Fatalf("run command: %v", err)
+			}
+			if client.listToken != "token" || client.getToken != "" || client.createToken != "" {
+				t.Fatalf("list token=%q get token=%q create token=%q", client.listToken, client.getToken, client.createToken)
+			}
+		})
+	}
+}
+
 func TestCmdAIChatInterruptCancelsOnlyActiveTurn(t *testing.T) {
 	conversation := chatTestConversation("conversation-1")
 	started := make(chan struct{})
@@ -207,6 +311,11 @@ func TestCmdAIChatPropagatesSafeFailures(t *testing.T) {
 			wantText: "timeout must be",
 		},
 		{
+			name:     "resume and ID",
+			command:  CmdAIChat{ID: "conversation-1", Resume: true, Timeout: time.Second},
+			wantText: "mutually exclusive",
+		},
+		{
 			name: "client factory",
 			command: CmdAIChat{
 				Timeout: time.Second,
@@ -231,6 +340,21 @@ func TestCmdAIChatPropagatesSafeFailures(t *testing.T) {
 			wantTarget: target,
 			wantText:   "create AI conversation",
 		},
+		{
+			name: "no conversations to resume",
+			command: CmdAIChat{
+				Resume:  true,
+				Timeout: time.Second,
+				In:      strings.NewReader(""),
+				newAuthTokenClient: func() (authTokenClient, error) {
+					return &fakeAuthTokenClient{token: "token"}, nil
+				},
+				newAIChatClient: func() (aiChatClient, error) {
+					return &fakeAIChatClient{}, nil
+				},
+			},
+			wantText: "no persistent AI conversations",
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			err := test.command.Run(t.Context())
@@ -250,6 +374,6 @@ func TestCmdAIChatPropagatesSafeFailures(t *testing.T) {
 func chatTestConversation(id string) clientai.Conversation {
 	now := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
 	return clientai.Conversation{
-		ID: id, CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(7 * 24 * time.Hour),
+		ID: id, Title: "Cluster health", CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(7 * 24 * time.Hour),
 	}
 }

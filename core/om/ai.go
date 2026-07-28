@@ -33,6 +33,7 @@ The agent is local to the node. OPENSVC_AI_AGENT_URL can override its default
 loopback URL for local development or non-default local deployments.`,
 		Example: `  om ai ask "Assess the health of my cluster"
   om ai chat
+  om ai chat --resume
   om ai chat CONVERSATION_ID
   om ai list
   om ai list --output json
@@ -84,7 +85,8 @@ func newCmdAIChat() *cobra.Command {
 		Long: `Start a persistent interactive AI conversation or resume an owned one.
 
 Each prompt obtains a fresh short-lived OpenSVC access token. Ctrl+C cancels
-only the active turn. Enter exit or quit, or send EOF, to end the session.`,
+only the active turn. Use --resume to select an existing conversation. Enter
+exit or quit, or send EOF, to end the session.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			options.ID = ""
@@ -97,7 +99,9 @@ only the active turn. Enter exit or quit, or send EOF, to end the session.`,
 			return runAIChatCommand(cmd, &options)
 		},
 	}
-	cmd.Flags().DurationVar(&options.Timeout, "timeout", omcmd.DefaultAIChatTurnTimeout, "maximum duration for each conversation turn")
+	flags := cmd.Flags()
+	flags.BoolVar(&options.Resume, "resume", false, "select and resume an existing conversation")
+	flags.DurationVar(&options.Timeout, "timeout", omcmd.DefaultAIChatTurnTimeout, "maximum duration for each conversation turn")
 	return cmd
 }
 
