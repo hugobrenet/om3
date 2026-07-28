@@ -17,12 +17,14 @@ const (
 	DefaultAIConversationTimeout = 30 * time.Second
 	minimumAIConversationTimeout = time.Second
 	maximumAIConversationTimeout = 2 * time.Minute
-	conversationTableColumns     = "ID:id,CREATED_AT:created_at,UPDATED_AT:updated_at,EXPIRES_AT:expires_at,STORED_BYTES:stored_bytes"
+	conversationTableColumns     = "TITLE:title,ID:id,CREATED_AT:created_at,UPDATED_AT:updated_at,EXPIRES_AT:expires_at,STORED_BYTES:stored_bytes"
+	untitledConversationLabel    = "Untitled conversation"
 )
 
 type aiConversationClient interface {
 	ListConversations(context.Context, string) ([]clientai.Conversation, error)
 	GetConversation(context.Context, string, string) (clientai.Conversation, error)
+	UpdateConversationTitle(context.Context, string, string, string) (clientai.Conversation, error)
 	DeleteConversation(context.Context, string, string) error
 }
 
@@ -57,8 +59,13 @@ func (o conversationOutput) GetItems() any {
 func conversationItems(items []clientai.Conversation) unstructured.List {
 	result := make(unstructured.List, len(items))
 	for index, item := range items {
+		title := item.Title
+		if title == "" {
+			title = untitledConversationLabel
+		}
 		result[index] = map[string]any{
 			"id":           item.ID,
+			"title":        title,
 			"created_at":   item.CreatedAt,
 			"updated_at":   item.UpdatedAt,
 			"expires_at":   item.ExpiresAt,

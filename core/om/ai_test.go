@@ -20,7 +20,7 @@ func TestAICommandHelpDocumentsSubcommands(t *testing.T) {
 		t.Fatalf("execute help: %v", err)
 	}
 	for _, expected := range []string{
-		"ask", "chat", "list", "show", "delete", "metadata only",
+		"ask", "chat", "list", "show", "rename", "delete", "metadata only",
 		"OPENSVC_AI_AGENT_URL", "om ai chat CONVERSATION_ID", "om ai show CONVERSATION_ID",
 	} {
 		if !strings.Contains(output.String(), expected) {
@@ -93,6 +93,10 @@ func TestAIConversationCommandContracts(t *testing.T) {
 		{
 			name: "delete", cmd: newCmdAIDelete(), validArgs: []string{"id"}, invalidArg: nil,
 			wantUse: "delete CONVERSATION_ID", wantAlias: "del",
+		},
+		{
+			name: "rename", cmd: newCmdAIRename(), validArgs: []string{"id", "Cluster", "health"}, invalidArg: []string{"id"},
+			wantUse: "rename CONVERSATION_ID TITLE", wantOutput: true,
 		},
 	}
 	for _, test := range tests {

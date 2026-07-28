@@ -22,9 +22,9 @@ func newCmdAI() *cobra.Command {
 		Short: "interact with the local OpenSVC AI agent",
 		Long: `Interact with the local OpenSVC AI agent.
 
-The ask command submits one non-persistent prompt. The list, show, and delete
-commands manage persistent conversations owned by the authenticated OpenSVC
-identity. The chat command creates or resumes an interactive persistent
+The ask command submits one non-persistent prompt. The list, show, rename, and
+delete commands manage persistent conversations owned by the authenticated
+OpenSVC identity. The chat command creates or resumes an interactive persistent
 conversation. The show command returns conversation metadata only;
 conversation messages are not exposed by the agent API. Conversations expire
 automatically.
@@ -37,6 +37,7 @@ loopback URL for local development or non-default local deployments.`,
   om ai list
   om ai list --output json
   om ai show CONVERSATION_ID
+  om ai rename CONVERSATION_ID "Cluster health review"
   om ai delete CONVERSATION_ID`,
 	}
 	cmd.AddCommand(
@@ -44,8 +45,32 @@ loopback URL for local development or non-default local deployments.`,
 		newCmdAIChat(),
 		newCmdAIList(),
 		newCmdAIShow(),
+		newCmdAIRename(),
 		newCmdAIDelete(),
 	)
+	return cmd
+}
+
+func newCmdAIRename() *cobra.Command {
+	options := omcmd.CmdAIRename{OptsAIConversation: omcmd.OptsAIConversation{
+		Timeout: omcmd.DefaultAIConversationTimeout,
+	}}
+	cmd := &cobra.Command{
+		Use:   "rename CONVERSATION_ID TITLE",
+		Short: "rename a persistent AI conversation",
+		Long:  "Rename one owned persistent conversation and return its updated metadata. Conversation titles do not have to be unique.",
+		Args:  cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			options.ID = args[0]
+			options.Title = strings.Join(args[1:], " ")
+			options.Out = cmd.OutOrStdout()
+			return runAICommand(cmd, options.Run)
+		},
+	}
+	flags := cmd.Flags()
+	flags.DurationVar(&options.Timeout, "timeout", omcmd.DefaultAIConversationTimeout, "maximum duration for the conversation request")
+	commoncmd.FlagOutput(flags, &options.Output)
+	commoncmd.FlagColor(flags, &options.Color)
 	return cmd
 }
 

@@ -18,9 +18,12 @@ type fakeAIConversationClient struct {
 	listErr     error
 	getErr      error
 	deleteErr   error
+	updateErr   error
 	token       string
 	getID       string
 	deleteID    string
+	updateID    string
+	updateTitle string
 	hasDeadline bool
 }
 
@@ -44,6 +47,14 @@ func (c *fakeAIConversationClient) DeleteConversation(ctx context.Context, token
 	return c.deleteErr
 }
 
+func (c *fakeAIConversationClient) UpdateConversationTitle(ctx context.Context, token string, id string, title string) (clientai.Conversation, error) {
+	c.token = token
+	c.updateID = id
+	c.updateTitle = title
+	_, c.hasDeadline = ctx.Deadline()
+	return c.item, c.updateErr
+}
+
 func TestCmdAIListRendersConversations(t *testing.T) {
 	items := []clientai.Conversation{
 		testAIConversation("conversation-1", 1024),
@@ -57,7 +68,7 @@ func TestCmdAIListRendersConversations(t *testing.T) {
 		{
 			name: "table",
 			check: func(t *testing.T, value string) {
-				for _, expected := range []string{"ID", "UPDATED_AT", "STORED_BYTES", "conversation-1", "conversation-2"} {
+				for _, expected := range []string{"TITLE", "ID", "UPDATED_AT", "STORED_BYTES", "Cluster health conversation-1", "conversation-2"} {
 					if !strings.Contains(value, expected) {
 						t.Fatalf("output %q does not contain %q", value, expected)
 					}
@@ -91,6 +102,45 @@ func TestCmdAIListRendersConversations(t *testing.T) {
 			}
 			test.check(t, stdout.String())
 		})
+	}
+}
+
+func TestCmdAIRenameUpdatesAndRendersConversation(t *testing.T) {
+	const (
+		id    = "conversation-1"
+		title = "Renamed incident"
+	)
+	item := testAIConversation(id, 1024)
+	item.Title = title
+	tokenClient := &fakeAuthTokenClient{token: "access-token"}
+	agentClient := &fakeAIConversationClient{item: item}
+	var stdout bytes.Buffer
+	command := &CmdAIRename{
+		OptsAIConversation: testAIConversationOptions(&stdout, "json", tokenClient, agentClient),
+		ID:                 id,
+		Title:              title,
+	}
+	if err := command.Run(t.Context()); err != nil {
+		t.Fatalf("run command: %v", err)
+	}
+	if agentClient.updateID != id || agentClient.updateTitle != title || agentClient.token != "access-token" || !agentClient.hasDeadline {
+		t.Fatalf("update ID=%q title=%q token=%q deadline=%v", agentClient.updateID, agentClient.updateTitle, agentClient.token, agentClient.hasDeadline)
+	}
+	var payload conversationOutput
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		t.Fatalf("decode output: %v", err)
+	}
+	if payload.Conversation != item {
+		t.Fatalf("output = %#v, want %#v", payload.Conversation, item)
+	}
+}
+
+func TestConversationTableUsesUntitledFallback(t *testing.T) {
+	item := testAIConversation("conversation-1", 0)
+	item.Title = ""
+	items := conversationItems([]clientai.Conversation{item})
+	if len(items) != 1 || items[0]["title"] != untitledConversationLabel {
+		t.Fatalf("items = %#v", items)
 	}
 }
 
@@ -172,6 +222,22 @@ func TestAIConversationCommandsReturnWrappedFailures(t *testing.T) {
 			wantText:   "conversation ID is empty",
 		},
 		{
+			name: "rename empty ID",
+			run: func(ctx context.Context) error {
+				return (&CmdAIRename{Title: "title"}).Run(ctx)
+			},
+			wantTarget: ErrCmdAIRename,
+			wantText:   "conversation ID is empty",
+		},
+		{
+			name: "rename empty title",
+			run: func(ctx context.Context) error {
+				return (&CmdAIRename{ID: "conversation-1"}).Run(ctx)
+			},
+			wantTarget: ErrCmdAIRename,
+			wantText:   "conversation title is empty",
+		},
+		{
 			name: "agent client",
 			run: func(ctx context.Context) error {
 				command := &CmdAIList{OptsAIConversation: OptsAIConversation{
@@ -214,6 +280,18 @@ func TestAIConversationCommandsReturnWrappedFailures(t *testing.T) {
 			},
 			wantTarget: target,
 		},
+		{
+			name: "rename request",
+			run: func(ctx context.Context) error {
+				command := &CmdAIRename{
+					OptsAIConversation: testAIConversationOptions(&bytes.Buffer{}, "", &fakeAuthTokenClient{token: "token"}, &fakeAIConversationClient{updateErr: target}),
+					ID:                 "conversation-1",
+					Title:              "title",
+				}
+				return command.Run(ctx)
+			},
+			wantTarget: target,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -249,7 +327,7 @@ func testAIConversationOptions(out *bytes.Buffer, output string, tokenClient aut
 func testAIConversation(id string, storedBytes int64) clientai.Conversation {
 	createdAt := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
 	return clientai.Conversation{
-		ID: id, CreatedAt: createdAt, UpdatedAt: createdAt.Add(time.Minute),
+		ID: id, Title: "Cluster health " + id, CreatedAt: createdAt, UpdatedAt: createdAt.Add(time.Minute),
 		ExpiresAt: createdAt.Add(7 * 24 * time.Hour), StoredBytes: storedBytes,
 	}
 }
