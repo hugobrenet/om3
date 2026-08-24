@@ -10,7 +10,9 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 
+	"github.com/opensvc/om3/v3/core/collector"
 	"github.com/opensvc/om3/v3/core/oc3path"
 	"github.com/opensvc/om3/v3/core/rawconfig"
 	"github.com/opensvc/om3/v3/util/asset"
@@ -247,7 +249,136 @@ func (t Node) getAsset() (asset.Data, error) {
 	return data, nil
 }
 
+// pushAsset selects the Collector protocol from the node configuration.
+// Explicit Collector v3 feeder settings take precedence over the legacy
+// Collector v2 node.dbopensvc setting.
 func (t Node) pushAsset(data asset.Data) error {
+	if t.CollectorRawConfig().FeederUrl() != "" {
+		return t.pushAssetV3(data)
+	}
+	if t.MergedConfig().GetString(key.Parse("node.dbopensvc")) != "" {
+		return t.pushAssetV2(data)
+	}
+
+	// Preserve the existing ErrConfig error returned by CollectorFeeder when
+	// neither a Collector v3 nor a Collector v2 endpoint is configured.
+	return t.pushAssetV3(data)
+}
+
+// callCollectorV2 executes a Collector v2 JSON-RPC call and checks both the
+// transport error and the error possibly embedded in the JSON-RPC response.
+func callCollectorV2(client *collector.Client, method string, params ...interface{}) error {
+	response, err := client.Call(method, params...)
+	if err != nil {
+		return err
+	}
+	if response == nil {
+		return fmt.Errorf("collector rpc %s: empty response", method)
+	}
+	if response.Error != nil {
+		return fmt.Errorf("collector rpc %s: %s: %v", method, response.Error.Message, response.Error.Data)
+	}
+	return nil
+}
+
+// assetDataForCollectorV2 converts the current asset.Data representation to
+// the vars/vals and generic table representation expected by Collector v2.
+func assetDataForCollectorV2(data asset.Data, nodename string) (map[string]any, []string, []any) {
+	gen := make(map[string]any)
+	gen["hardware"] = data.Hardware
+
+	hbaVars := []string{"nodename", "hba_id", "hba_type"}
+	hbaVals := make([][]any, 0, len(data.HBA))
+	for _, e := range data.HBA {
+		hbaVals = append(hbaVals, []any{nodename, e.Name, e.Type})
+	}
+	gen["hba"] = []any{hbaVars, hbaVals}
+
+	targetVars := []string{"hba_id", "tgt_id"}
+	targetVals := make([][]any, 0, len(data.Targets))
+	for _, e := range data.Targets {
+		targetVals = append(targetVals, []any{e.Initiator.Name, e.Target.Name})
+	}
+	gen["targets"] = []any{targetVars, targetVals}
+
+	lanVars := []string{"mac", "intf", "type", "addr", "mask", "flag_deprecated"}
+	lanVals := make([][]any, 0)
+	macs := make([]string, 0, len(data.LAN))
+	for mac := range data.LAN {
+		macs = append(macs, mac)
+	}
+	sort.Strings(macs)
+	for _, mac := range macs {
+		for _, e := range data.LAN[mac] {
+			lanVals = append(lanVals, []any{mac, e.Intf, e.Type, e.Address, e.Mask, e.FlagDeprecated})
+		}
+	}
+	gen["lan"] = []any{lanVars, lanVals}
+
+	uidVars := []string{"user_name", "user_id"}
+	uidVals := make([][]any, 0, len(data.UIDS))
+	for _, e := range data.UIDS {
+		uidVals = append(uidVals, []any{e.Name, e.ID})
+	}
+	gen["uids"] = []any{uidVars, uidVals}
+
+	gidVars := []string{"group_name", "group_id"}
+	gidVals := make([][]any, 0, len(data.GIDS))
+	for _, e := range data.GIDS {
+		gidVals = append(gidVals, []any{e.Name, e.ID})
+	}
+	gen["gids"] = []any{gidVars, gidVals}
+
+	properties := data.Values()
+	sort.Slice(properties, func(i, j int) bool {
+		return properties[i].Name < properties[j].Name
+	})
+	vars := make([]string, 0, len(properties))
+	vals := make([]any, 0, len(properties))
+	for _, property := range properties {
+		value := property.Value
+		if value == nil {
+			value = ""
+		}
+		vars = append(vars, property.Name)
+		vals = append(vals, value)
+	}
+
+	return gen, vars, vals
+}
+
+// pushAssetV2 sends the node inventory using the Collector v2 JSON-RPC API.
+func (t Node) pushAssetV2(data asset.Data) error {
+	endpoint := t.MergedConfig().GetString(key.Parse("node.dbopensvc"))
+	secret := t.Config().GetString(key.Parse("node.uuid"))
+	if endpoint == "" {
+		return collector.ErrConfig
+	}
+	if secret == "" {
+		return collector.ErrUnregistered
+	}
+
+	cfg := collector.Config{
+		FeederUrl: endpoint,
+		Password:  secret,
+		Insecure:  t.MergedConfig().GetBool(key.Parse("node.dbinsecure")),
+	}
+	client, err := cfg.NewFeedClient()
+	if err != nil {
+		return err
+	}
+
+	gen, vars, vals := assetDataForCollectorV2(data, hostname.Hostname())
+	if len(gen) > 0 {
+		if err := callCollectorV2(client, "insert_generic", gen); err != nil {
+			return err
+		}
+	}
+	return callCollectorV2(client, "update_asset", vars, vals)
+}
+
+// pushAssetV3 sends the node inventory using the Collector v3 feeder API.
+func (t Node) pushAssetV3(data asset.Data) error {
 	var (
 		req  *http.Request
 		resp *http.Response
