@@ -11,16 +11,66 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"github.com/opensvc/om3/v3/core/collector"
 	"github.com/opensvc/om3/v3/core/oc3path"
 	"github.com/opensvc/om3/v3/core/rawconfig"
+	"github.com/opensvc/om3/v3/daemon/daemonenv"
 	"github.com/opensvc/om3/v3/util/asset"
 	"github.com/opensvc/om3/v3/util/hostname"
 	"github.com/opensvc/om3/v3/util/key"
 	"github.com/opensvc/om3/v3/util/san"
 	"github.com/opensvc/om3/v3/util/version"
 )
+
+const collectorV2DateTimeLayout = "2006-01-02 15:04:05"
+
+// collectorV2AssetPropertyNames is the asset property contract implemented by
+// the v2 agent for Collector v2. Keep this list explicit: newer om3-only asset
+// properties must not leak into the legacy Collector nodes table.
+var collectorV2AssetPropertyNames = []string{
+	"asset_env",
+	"bios_version",
+	"cluster_id",
+	"connect_to",
+	"cpu_cores",
+	"cpu_dies",
+	"cpu_freq",
+	"cpu_model",
+	"cpu_threads",
+	"enclosure",
+	"fqdn",
+	"last_boot",
+	"listener_port",
+	"loc_addr",
+	"loc_building",
+	"loc_city",
+	"loc_country",
+	"loc_floor",
+	"loc_rack",
+	"loc_room",
+	"loc_zip",
+	"manufacturer",
+	"mem_banks",
+	"mem_bytes",
+	"mem_slots",
+	"model",
+	"node_env",
+	"nodename",
+	"os_arch",
+	"os_kernel",
+	"os_name",
+	"os_release",
+	"os_vendor",
+	"sec_zone",
+	"serial",
+	"sp_version",
+	"team_integ",
+	"team_support",
+	"tz",
+	"version",
+}
 
 type (
 	// prober is responsible for a bunch of asset properties, and is
@@ -283,7 +333,7 @@ func callCollectorV2(client *collector.Client, method string, params ...interfac
 
 // assetDataForCollectorV2 converts the current asset.Data representation to
 // the vars/vals and generic table representation expected by Collector v2.
-func assetDataForCollectorV2(data asset.Data, nodename string) (map[string]any, []string, []any) {
+func assetDataForCollectorV2(data asset.Data, nodename string) (map[string]any, []string, []any, error) {
 	gen := make(map[string]any)
 	gen["hardware"] = data.Hardware
 
@@ -329,22 +379,57 @@ func assetDataForCollectorV2(data asset.Data, nodename string) (map[string]any, 
 	}
 	gen["gids"] = []any{gidVars, gidVals}
 
-	properties := data.Values()
-	sort.Slice(properties, func(i, j int) bool {
-		return properties[i].Name < properties[j].Name
-	})
-	vars := make([]string, 0, len(properties))
-	vals := make([]any, 0, len(properties))
-	for _, property := range properties {
-		value := property.Value
-		if value == nil {
-			value = ""
+	properties := make(map[string]asset.Property)
+	for _, property := range data.Values() {
+		properties[property.Name] = property
+	}
+	vars := make([]string, 0, len(collectorV2AssetPropertyNames))
+	vals := make([]any, 0, len(collectorV2AssetPropertyNames))
+	for _, name := range collectorV2AssetPropertyNames {
+		property, ok := properties[name]
+		if !ok {
+			continue
 		}
-		vars = append(vars, property.Name)
+		value, err := assetPropertyValueForCollectorV2(property)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		vars = append(vars, name)
 		vals = append(vals, value)
 	}
 
-	return gen, vars, vals
+	return gen, vars, vals, nil
+}
+
+func assetPropertyValueForCollectorV2(property asset.Property) (any, error) {
+	if property.Name == "listener_port" && property.Value == nil {
+		return fmt.Sprint(daemonenv.HTTPPort), nil
+	}
+	if property.Value == nil {
+		return "", nil
+	}
+	if property.Name == "listener_port" && property.Value == "" {
+		return fmt.Sprint(daemonenv.HTTPPort), nil
+	}
+	if property.Name != "last_boot" {
+		return property.Value, nil
+	}
+
+	s, ok := property.Value.(string)
+	if !ok {
+		return nil, fmt.Errorf("convert asset property last_boot for Collector v2: expected string, got %T", property.Value)
+	}
+	if s == "" {
+		return "", nil
+	}
+	if _, err := time.ParseInLocation(collectorV2DateTimeLayout, s, time.Local); err == nil {
+		return s, nil
+	}
+	tm, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return nil, fmt.Errorf("convert asset property last_boot for Collector v2: %w", err)
+	}
+	return tm.Format(collectorV2DateTimeLayout), nil
 }
 
 // pushAssetV2 sends the node inventory using the Collector v2 JSON-RPC API.
@@ -368,7 +453,10 @@ func (t Node) pushAssetV2(data asset.Data) error {
 		return err
 	}
 
-	gen, vars, vals := assetDataForCollectorV2(data, hostname.Hostname())
+	gen, vars, vals, err := assetDataForCollectorV2(data, hostname.Hostname())
+	if err != nil {
+		return err
+	}
 	if len(gen) > 0 {
 		if err := callCollectorV2(client, "insert_generic", gen); err != nil {
 			return err

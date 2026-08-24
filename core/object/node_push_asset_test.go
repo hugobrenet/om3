@@ -17,17 +17,24 @@ func TestAssetDataForCollectorV2Properties(t *testing.T) {
 			Nodename:  asset.Property{Value: "node1"},
 			Serial:    asset.Property{Value: nil},
 			Version:   asset.Property{Value: "v3-test"},
+			BootID:    asset.Property{Value: "om3-only-boot-id"},
+			LastBoot:  asset.Property{Value: "2026-08-21T05:12:42+09:00"},
 		},
 	}
 
-	_, vars, vals := assetDataForCollectorV2(data, "node1")
+	_, vars, vals, err := assetDataForCollectorV2(data, "node1")
+	require.NoError(t, err)
 
 	require.Len(t, vals, len(vars))
+	require.Len(t, vars, len(collectorV2AssetPropertyNames))
 	require.True(t, sort.StringsAreSorted(vars))
 	require.Equal(t, "cluster-id", collectorV2PropertyValue(t, vars, vals, "cluster_id"))
+	require.Equal(t, "2026-08-21 05:12:42", collectorV2PropertyValue(t, vars, vals, "last_boot"))
+	require.Equal(t, "1215", collectorV2PropertyValue(t, vars, vals, "listener_port"))
 	require.Equal(t, "node1", collectorV2PropertyValue(t, vars, vals, "nodename"))
 	require.Equal(t, "", collectorV2PropertyValue(t, vars, vals, "serial"))
 	require.Equal(t, "v3-test", collectorV2PropertyValue(t, vars, vals, "version"))
+	require.NotContains(t, vars, "boot_id")
 
 	// The conversion must not mutate the source asset data.
 	require.Nil(t, data.Properties.Serial.Value)
@@ -60,7 +67,8 @@ func TestAssetDataForCollectorV2GenericTables(t *testing.T) {
 		GIDS: []asset.Group{{Name: "users", ID: 1000}},
 	}
 
-	gen, _, _ := assetDataForCollectorV2(data, "node1")
+	gen, _, _, err := assetDataForCollectorV2(data, "node1")
+	require.NoError(t, err)
 
 	require.Equal(t, data.Hardware, gen["hardware"])
 	require.Equal(t, []any{
@@ -89,6 +97,17 @@ func TestAssetDataForCollectorV2GenericTables(t *testing.T) {
 
 	// Sorting the LAN output must not reorder or rewrite the source map.
 	require.Equal(t, "eth1", data.LAN["02:00:00:00:00:02"][0].Intf)
+}
+
+func TestAssetDataForCollectorV2RejectsInvalidLastBoot(t *testing.T) {
+	data := asset.Data{
+		Properties: asset.Properties{
+			LastBoot: asset.Property{Value: "not-a-date"},
+		},
+	}
+
+	_, _, _, err := assetDataForCollectorV2(data, "node1")
+	require.ErrorContains(t, err, "convert asset property last_boot for Collector v2")
 }
 
 func collectorV2PropertyValue(t *testing.T, vars []string, vals []any, name string) any {
