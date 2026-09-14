@@ -21,7 +21,7 @@ func TestAICommandHelpDocumentsSubcommands(t *testing.T) {
 	}
 	for _, expected := range []string{
 		"ask", "chat", "list", "show", "rename", "delete", "metadata only",
-		"OPENSVC_AI_AGENT_URL", "om ai chat CONVERSATION_ID", "om ai show CONVERSATION_ID",
+		"OPENSVC_AI_AGENT_SOCKET", "OPENSVC_AI_AGENT_URL", "om ai chat CONVERSATION_ID", "om ai show CONVERSATION_ID",
 	} {
 		if !strings.Contains(output.String(), expected) {
 			t.Fatalf("help output does not contain %q:\n%s", expected, output.String())

@@ -9,13 +9,18 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 	"unicode"
 )
 
 const (
-	defaultBaseURL          = "http://127.0.0.1:8090"
+	defaultSocketPath       = "/run/opensvc-ai-agent/agent.sock"
+	unixBaseURL             = "http://127.0.0.1"
+	socketPathEnv           = "OPENSVC_AI_AGENT_SOCKET"
 	baseURLEnv              = "OPENSVC_AI_AGENT_URL"
+	maximumUnixPathBytes    = 107
 	maxErrorBodyBytes       = 64 << 10
 	maxErrorCodeRunes       = 128
 	maxErrorMessageRunes    = 2048
@@ -50,10 +55,17 @@ func (e *APIError) Error() string {
 
 func New() (*Client, error) {
 	baseURL := strings.TrimSpace(os.Getenv(baseURLEnv))
-	if baseURL == "" {
-		baseURL = defaultBaseURL
+	socketPath := strings.TrimSpace(os.Getenv(socketPathEnv))
+	if baseURL != "" {
+		if socketPath != "" {
+			return nil, fmt.Errorf("%s and %s are mutually exclusive", baseURLEnv, socketPathEnv)
+		}
+		return newClient(baseURL, nil)
 	}
-	return newClient(baseURL, nil)
+	if socketPath == "" {
+		socketPath = defaultSocketPath
+	}
+	return newUnixClient(socketPath)
 }
 
 func newClient(baseURL string, httpClient *http.Client) (*Client, error) {
@@ -85,6 +97,42 @@ func newClient(baseURL string, httpClient *http.Client) (*Client, error) {
 		return http.ErrUseLastResponse
 	}
 	return &Client{baseURL: parsed, httpClient: httpClient}, nil
+}
+
+func newUnixClient(socketPath string) (*Client, error) {
+	path, err := cleanUnixSocketPath(socketPath)
+	if err != nil {
+		return nil, fmt.Errorf("parse ai agent Unix socket path: %w", err)
+	}
+	parsed, err := url.Parse(unixBaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse internal ai agent URL: %w", err)
+	}
+	dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	transport.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return dialer.DialContext(ctx, "unix", path)
+	}
+	httpClient := &http.Client{Transport: transport}
+	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	return &Client{baseURL: parsed, httpClient: httpClient}, nil
+}
+
+func cleanUnixSocketPath(value string) (string, error) {
+	path := filepath.Clean(strings.TrimSpace(value))
+	if !filepath.IsAbs(path) {
+		return "", fmt.Errorf("path must be absolute")
+	}
+	if path == string(filepath.Separator) {
+		return "", fmt.Errorf("path must name a socket")
+	}
+	if len([]byte(path)) > maximumUnixPathBytes {
+		return "", fmt.Errorf("path exceeds the Linux Unix socket limit of %d bytes", maximumUnixPathBytes)
+	}
+	return path, nil
 }
 
 func (c *Client) endpoint(path string) string {

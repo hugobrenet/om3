@@ -18,8 +18,9 @@ func init() {
 
 func newCmdAI() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "ai",
-		Short: "interact with the local OpenSVC AI agent",
+		GroupID: commoncmd.GroupIDSubsystems,
+		Use:     "ai",
+		Short:   "interact with the local OpenSVC AI agent",
 		Long: `Interact with the local OpenSVC AI agent.
 
 The ask command submits one non-persistent prompt. The list, show, rename, and
@@ -29,8 +30,9 @@ conversation. The show command returns conversation metadata only;
 conversation messages are not exposed by the agent API. Conversations expire
 automatically.
 
-The agent is local to the node. OPENSVC_AI_AGENT_URL can override its default
-loopback URL for local development or non-default local deployments.`,
+The agent is local to the node. By default, the client connects to
+/run/opensvc-ai-agent/agent.sock. OPENSVC_AI_AGENT_SOCKET overrides that path.
+OPENSVC_AI_AGENT_URL selects the temporary loopback TCP fallback instead.`,
 		Example: `  om ai ask "Assess the health of my cluster"
   om ai chat
   om ai chat --resume
