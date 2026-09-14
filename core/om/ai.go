@@ -31,8 +31,7 @@ conversation messages are not exposed by the agent API. Conversations expire
 automatically.
 
 The agent is local to the node. By default, the client connects to
-/run/opensvc-ai-agent/agent.sock. OPENSVC_AI_AGENT_SOCKET overrides that path.
-OPENSVC_AI_AGENT_URL selects the temporary loopback TCP fallback instead.`,
+/run/opensvc-ai-agent/agent.sock. OPENSVC_AI_AGENT_SOCKET overrides that path.`,
 		Example: `  om ai ask "Assess the health of my cluster"
   om ai chat
   om ai chat --resume

@@ -31,7 +31,7 @@ func TestClientListsConversations(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client, err := newClient(server.URL, server.Client())
+	client, err := newTestClient(server.URL, server.Client())
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestClientCreatesConversation(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client, err := newClient(server.URL, server.Client())
+	client, err := newTestClient(server.URL, server.Client())
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestClientSendsConversationTurn(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client, err := newClient(server.URL, server.Client())
+	client, err := newTestClient(server.URL, server.Client())
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestClientUpdatesConversationTitle(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client, err := newClient(server.URL, server.Client())
+	client, err := newTestClient(server.URL, server.Client())
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestClientGetsAndDeletesConversation(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client, err := newClient(server.URL, server.Client())
+	client, err := newTestClient(server.URL, server.Client())
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestConversationMethodsRejectInvalidInputBeforeRequest(t *testing.T) {
 		calls.Add(1)
 	}))
 	t.Cleanup(server.Close)
-	client, err := newClient(server.URL, server.Client())
+	client, err := newTestClient(server.URL, server.Client())
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
@@ -260,7 +260,7 @@ func TestConversationMethodsReturnSanitizedAPIErrors(t *testing.T) {
 		_, _ = fmt.Fprintf(response, `{"error":{"code":"conversation_not_found","message":"bad %s"}}`, token)
 	}))
 	t.Cleanup(server.Close)
-	client, err := newClient(server.URL, server.Client())
+	client, err := newTestClient(server.URL, server.Client())
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestClientRejectsInvalidConversationResponses(t *testing.T) {
 				_, _ = fmt.Fprint(response, test.body)
 			}))
 			t.Cleanup(server.Close)
-			client, err := newClient(server.URL, server.Client())
+			client, err := newTestClient(server.URL, server.Client())
 			if err != nil {
 				t.Fatalf("new client: %v", err)
 			}
@@ -323,7 +323,7 @@ func TestClientRejectsMismatchedConversationID(t *testing.T) {
 		_ = json.NewEncoder(response).Encode(conversationEnvelope{Conversation: testConversation("conversation-2")})
 	}))
 	t.Cleanup(server.Close)
-	client, err := newClient(server.URL, server.Client())
+	client, err := newTestClient(server.URL, server.Client())
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
@@ -340,7 +340,7 @@ func TestClientRejectsMismatchedConversationTitle(t *testing.T) {
 		_ = json.NewEncoder(response).Encode(conversationEnvelope{Conversation: item})
 	}))
 	t.Cleanup(server.Close)
-	client, err := newClient(server.URL, server.Client())
+	client, err := newTestClient(server.URL, server.Client())
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}

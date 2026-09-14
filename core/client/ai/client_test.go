@@ -2,17 +2,49 @@ package ai
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
+func newTestClient(baseURL string, httpClient *http.Client) (*Client, error) {
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse ai agent test base URL: %w", err)
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return nil, fmt.Errorf("ai agent test base URL scheme must be http or https")
+	}
+	if parsed.Host == "" {
+		return nil, fmt.Errorf("ai agent test base URL host is empty")
+	}
+	if (parsed.Path != "" && parsed.Path != "/") || parsed.RawPath != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.User != nil {
+		return nil, fmt.Errorf("ai agent test base URL must not contain a path, credentials, query, or fragment")
+	}
+	ip := net.ParseIP(parsed.Hostname())
+	if ip == nil || !ip.IsLoopback() {
+		return nil, fmt.Errorf("ai agent test base URL must use a loopback IP")
+	}
+	parsed.Path = ""
+	if httpClient == nil {
+		httpClient = &http.Client{}
+	} else {
+		clone := *httpClient
+		httpClient = &clone
+	}
+	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	return &Client{baseURL: parsed, httpClient: httpClient}, nil
+}
+
 func TestNewUsesDefaultUnixSocket(t *testing.T) {
-	t.Setenv(baseURLEnv, "")
 	t.Setenv(socketPathEnv, "")
 	client, err := New()
 	if err != nil {
@@ -23,28 +55,7 @@ func TestNewUsesDefaultUnixSocket(t *testing.T) {
 	}
 }
 
-func TestNewUsesLoopbackBaseURLFromEnvironment(t *testing.T) {
-	t.Setenv(baseURLEnv, " http://127.0.0.1:19090/ ")
-	t.Setenv(socketPathEnv, "")
-	client, err := New()
-	if err != nil {
-		t.Fatalf("new client: %v", err)
-	}
-	if got, want := client.baseURL.String(), "http://127.0.0.1:19090"; got != want {
-		t.Fatalf("base URL = %q, want %q", got, want)
-	}
-}
-
-func TestNewRejectsNonLoopbackBaseURLFromEnvironment(t *testing.T) {
-	t.Setenv(baseURLEnv, "https://example.com")
-	t.Setenv(socketPathEnv, "")
-	if _, err := New(); err == nil {
-		t.Fatal("new client accepted a non-loopback environment URL")
-	}
-}
-
 func TestNewUsesUnixSocketFromEnvironment(t *testing.T) {
-	t.Setenv(baseURLEnv, "")
 	t.Setenv(socketPathEnv, " /run/opensvc-ai-agent/../opensvc-ai-agent/custom.sock ")
 	client, err := New()
 	if err != nil {
@@ -66,14 +77,6 @@ func TestNewRejectsInvalidUnixSocketPaths(t *testing.T) {
 				t.Fatal("invalid Unix socket path succeeded")
 			}
 		})
-	}
-}
-
-func TestNewRejectsAmbiguousTransport(t *testing.T) {
-	t.Setenv(baseURLEnv, "http://127.0.0.1:8090")
-	t.Setenv(socketPathEnv, defaultSocketPath)
-	if _, err := New(); err == nil {
-		t.Fatal("new client accepted both Unix socket and TCP configuration")
 	}
 }
 
@@ -142,7 +145,7 @@ func TestNewRejectsInvalidBaseURLs(t *testing.T) {
 		"http://127.0.0.1?token=value",
 	} {
 		t.Run(baseURL, func(t *testing.T) {
-			if _, err := newClient(baseURL, nil); err == nil {
+			if _, err := newTestClient(baseURL, nil); err == nil {
 				t.Fatal("invalid base URL succeeded")
 			}
 		})

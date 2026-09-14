@@ -43,7 +43,7 @@ func TestClientAskStreamsEvents(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	client, err := newClient(server.URL, server.Client())
+	client, err := newTestClient(server.URL, server.Client())
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestClientAskReturnsBoundedAPIErrorWithoutToken(t *testing.T) {
 		_, _ = fmt.Fprintf(response, `{"error":{"code":"unauthorized","message":"bad %s\ndetail"}}`, token)
 	}))
 	t.Cleanup(server.Close)
-	client, err := newClient(server.URL, server.Client())
+	client, err := newTestClient(server.URL, server.Client())
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestClientAskReturnsSanitizedStreamError(t *testing.T) {
 		_, _ = fmt.Fprintf(response, "event: error\ndata: {\"type\":\"error\",\"code\":\"agent_failed\",\"message\":\"bad %s\"}\n\n", token)
 	}))
 	t.Cleanup(server.Close)
-	client, err := newClient(server.URL, server.Client())
+	client, err := newTestClient(server.URL, server.Client())
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestClientAskRejectsRedirect(t *testing.T) {
 		http.Redirect(response, request, "/target", http.StatusTemporaryRedirect)
 	}))
 	t.Cleanup(server.Close)
-	client, err := newClient(server.URL, server.Client())
+	client, err := newTestClient(server.URL, server.Client())
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestClientAskRejectsMalformedOrIncompleteStream(t *testing.T) {
 			response.Header().Set("Content-Type", "text/event-stream")
 			_, _ = fmt.Fprint(response, body)
 		}))
-		client, err := newClient(server.URL, server.Client())
+		client, err := newTestClient(server.URL, server.Client())
 		if err != nil {
 			server.Close()
 			t.Fatalf("new client: %v", err)

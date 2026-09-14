@@ -19,7 +19,6 @@ const (
 	defaultSocketPath       = "/run/opensvc-ai-agent/agent.sock"
 	unixBaseURL             = "http://127.0.0.1"
 	socketPathEnv           = "OPENSVC_AI_AGENT_SOCKET"
-	baseURLEnv              = "OPENSVC_AI_AGENT_URL"
 	maximumUnixPathBytes    = 107
 	maxErrorBodyBytes       = 64 << 10
 	maxErrorCodeRunes       = 128
@@ -54,49 +53,11 @@ func (e *APIError) Error() string {
 }
 
 func New() (*Client, error) {
-	baseURL := strings.TrimSpace(os.Getenv(baseURLEnv))
 	socketPath := strings.TrimSpace(os.Getenv(socketPathEnv))
-	if baseURL != "" {
-		if socketPath != "" {
-			return nil, fmt.Errorf("%s and %s are mutually exclusive", baseURLEnv, socketPathEnv)
-		}
-		return newClient(baseURL, nil)
-	}
 	if socketPath == "" {
 		socketPath = defaultSocketPath
 	}
 	return newUnixClient(socketPath)
-}
-
-func newClient(baseURL string, httpClient *http.Client) (*Client, error) {
-	parsed, err := url.Parse(baseURL)
-	if err != nil {
-		return nil, fmt.Errorf("parse ai agent base URL: %w", err)
-	}
-	if parsed.Scheme != "http" && parsed.Scheme != "https" {
-		return nil, fmt.Errorf("ai agent base URL scheme must be http or https")
-	}
-	if parsed.Host == "" {
-		return nil, fmt.Errorf("ai agent base URL host is empty")
-	}
-	if (parsed.Path != "" && parsed.Path != "/") || parsed.RawPath != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.User != nil {
-		return nil, fmt.Errorf("ai agent base URL must not contain a path, credentials, query, or fragment")
-	}
-	ip := net.ParseIP(parsed.Hostname())
-	if ip == nil || !ip.IsLoopback() {
-		return nil, fmt.Errorf("ai agent base URL must use a loopback IP")
-	}
-	parsed.Path = ""
-	if httpClient == nil {
-		httpClient = &http.Client{}
-	} else {
-		clone := *httpClient
-		httpClient = &clone
-	}
-	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error {
-		return http.ErrUseLastResponse
-	}
-	return &Client{baseURL: parsed, httpClient: httpClient}, nil
 }
 
 func newUnixClient(socketPath string) (*Client, error) {
