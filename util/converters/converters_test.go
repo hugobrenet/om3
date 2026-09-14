@@ -27,7 +27,7 @@ func TestDurationConvert(t *testing.T) {
 	t.Run("valid duration expression returns expected values", func(t *testing.T) {
 		for s, expected := range validStrings {
 			t.Run(s, func(t *testing.T) {
-				result, err := Lookup("duration").Convert(s)
+				result, err := Duration.Convert(s)
 				require.NoError(t, err)
 				assert.Equal(t, expected, *result.(*time.Duration))
 			})
@@ -35,7 +35,7 @@ func TestDurationConvert(t *testing.T) {
 	})
 
 	t.Run("empty String returns nil", func(t *testing.T) {
-		result, err := Lookup("duration").Convert("")
+		result, err := Duration.Convert("")
 		assert.NoError(t, err)
 		assert.Nil(t, result)
 	})
@@ -43,7 +43,7 @@ func TestDurationConvert(t *testing.T) {
 	t.Run("invalid duration expression returns (nil, error)", func(t *testing.T) {
 		for _, s := range invalidStrings {
 			t.Run(s, func(t *testing.T) {
-				_, err := Lookup("duration").Convert(s)
+				_, err := Duration.Convert(s)
 				assert.Error(t, err)
 			})
 		}
@@ -82,7 +82,7 @@ func TestSizeConvert(t *testing.T) {
 	t.Run("Valid String return expected values", func(t *testing.T) {
 		for s, expected := range validStrings {
 			t.Run(s, func(t *testing.T) {
-				result, err := Lookup("size").Convert(s)
+				result, err := Size.Convert(s)
 				assert.Nilf(t, err, s)
 				resultInt64 := *result.(*int64)
 				assert.Equalf(t, expected, resultInt64, "ToSize('%v') -> %v", s, resultInt64)
@@ -91,7 +91,7 @@ func TestSizeConvert(t *testing.T) {
 	})
 
 	t.Run("empty String return nil", func(t *testing.T) {
-		result, err := Lookup("size").Convert("")
+		result, err := Size.Convert("")
 		assert.Nil(t, err)
 		assert.Nil(t, result)
 	})
@@ -99,9 +99,65 @@ func TestSizeConvert(t *testing.T) {
 	t.Run("invalid size return (nil, error)", func(t *testing.T) {
 		for _, s := range invalidStrings {
 			t.Run(s, func(t *testing.T) {
-				result, err := Lookup("size").Convert(s)
+				result, err := Size.Convert(s)
 				assert.NotNilf(t, err, "FromSize('%v') error is not nil", s)
 				assert.Nil(t, result, "FromSize('%v') return pointer is not nil", s)
+			})
+		}
+	})
+}
+
+func TestBooleanConvert(t *testing.T) {
+	var (
+		validStrings = map[string]bool{
+			"true":  true,
+			"TRUE":  true,
+			"yes":   true,
+			"Yes":   true,
+			"y":     true,
+			"t":     true,
+			"T":     true,
+			"1":     true,
+			"":      false,
+			"false": false,
+			"False": false,
+			"no":    false,
+			"NO":    false,
+			"n":     false,
+			"f":     false,
+			"N":     false,
+			"0":     false,
+			"0.0":   false,
+			"none":  false,
+			"[]":    false,
+			"{}":    false,
+		}
+
+		invalidStrings = []string{
+			"maybe",
+			"2",
+			"oui",
+			"non",
+			"o",
+			"n0",
+		}
+	)
+
+	t.Run("valid boolean expression returns expected values", func(t *testing.T) {
+		for s, expected := range validStrings {
+			t.Run(s, func(t *testing.T) {
+				result, err := Bool.Convert(s)
+				require.NoError(t, err)
+				assert.Equal(t, expected, result.(bool))
+			})
+		}
+	})
+
+	t.Run("invalid boolean expression returns (nil, error)", func(t *testing.T) {
+		for _, s := range invalidStrings {
+			t.Run(s, func(t *testing.T) {
+				_, err := Bool.Convert(s)
+				assert.Error(t, err)
 			})
 		}
 	})

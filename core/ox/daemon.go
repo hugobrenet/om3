@@ -16,6 +16,7 @@ func init() {
 	)
 	cmdDaemon.AddGroup(
 		commoncmd.NewGroupQuery(),
+		commoncmd.NewGroupSubsystems(),
 	)
 	cmdDaemon.AddCommand(
 		cmdDaemonDNS,
@@ -42,6 +43,7 @@ func init() {
 		commoncmd.NewCmdDaemonHeartbeatRestart(),
 		commoncmd.NewCmdDaemonHeartbeatStart(),
 		commoncmd.NewCmdDaemonHeartbeatStop(),
+		commoncmd.NewCmdDaemonHeartbeatList(""),
 		commoncmd.NewCmdDaemonHeartbeatStatus(""),
 		commoncmd.NewCmdHeartbeatSign(),
 		commoncmd.NewCmdHeartbeatWipe(),
@@ -52,10 +54,10 @@ func init() {
 		commoncmd.NewCmdDaemonListenerRestart(),
 		commoncmd.NewCmdDaemonListenerStart(),
 		commoncmd.NewCmdDaemonListenerStop(),
-		commoncmd.NewCmdDaemonListenerLog(),
 	)
 
 	cmdDaemonRelay.AddCommand(
+		commoncmd.NewCmdDaemonRelayList(),
 		commoncmd.NewCmdDaemonRelayStatus(),
 	)
 }

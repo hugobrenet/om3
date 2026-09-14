@@ -12,7 +12,13 @@ import (
 )
 
 var (
-	hbIndexRow   = -1
+	hbIndexRow = -1
+
+	// stateIndexRow is the row of the node states, where a node with a
+	// configuration issue is marked. The mark is selectable, and opens
+	// what it is about.
+	stateIndexRow = -1
+
 	separatorBar = "│"
 )
 
@@ -24,23 +30,24 @@ func (t *App) initObjectsTable() {
 		row, col := table.GetSelection()
 		switch {
 		case !t.viewPath.IsZero() && t.viewNode != "" && !(t.viewPath.Kind == naming.KindCfg || t.viewPath.Kind == naming.KindSec):
-			t.initTextView()
 			t.nav(viewInstance)
 		case t.viewPath.Kind == naming.KindCfg || t.viewPath.Kind == naming.KindSec:
 			t.nav(viewKeys)
 		case row == 0 && col == 1:
-			t.listContexts()
+			t.nav(viewContext)
 		case row == 1 && col == 1:
 			t.nav(viewEvents)
 		case (row >= hbIndexRow && row <= hbIndexRow+2) && (col >= t.headerRightCol && col <= t.firstInstanceCol+len(t.Current.Cluster.Config.Nodes)-1):
 			t.listHeartbeats(table, row, col)
+		case row == stateIndexRow && col >= t.firstInstanceCol:
+			t.listNodeIssues(table, col)
 		}
 	}
 
 	selectedFunc := func(row, col int) {
 		cell := table.GetCell(row, col)
 		path := table.GetCell(row, 0).Text
-		node := table.GetCell(0, col).Text
+		node := t.nodeByCol(col)
 		var selected *bool
 		switch {
 		case row == 0 && col >= t.firstInstanceCol:
@@ -105,9 +112,9 @@ func (t *App) initObjectsTable() {
 			t.viewPath = p
 		}
 		if col >= t.firstInstanceCol {
-			t.viewNode = t.objects.GetCell(0, col).Text
+			t.viewNode = t.nodeByCol(col)
 		}
-		t.position = Position{row: row, col: col}
+		t.frame().position = Position{row: row, col: col}
 		handleCursorPosition(row, col)
 	})
 	table.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -136,13 +143,24 @@ func (t *App) initObjectsTable() {
 	t.objects = table
 }
 
+// listNodeIssues opens the configuration issues of the node of a column,
+// which is where the mark on its states line points.
+func (t *App) listNodeIssues(table *tview.Table, col int) {
+	nodename := t.nodeByCol(col)
+	if len(t.nodeIssues(nodename)) == 0 {
+		return
+	}
+	t.viewNodeIssues = nodename
+	t.nav(viewNodeIssues)
+}
+
 func (t *App) listHeartbeats(table *tview.Table, row, col int) {
 	if hbIndexRow == -1 {
 		return
 	}
 	var nodeFilter string
 	if col >= t.firstInstanceCol {
-		nodeFilter = table.GetCell(0, col).Text
+		nodeFilter = t.nodeByCol(col)
 	}
 	var hbDirection string
 	cellText := table.GetCell(row, 3).Text
@@ -166,8 +184,13 @@ func (t *App) updateObjects() {
 	}
 
 	nodesCells := func(row int, selectable bool) {
+		// A node column is as wide as its header, and the domain the nodes
+		// share says nothing the neighbouring columns do not say too. The
+		// node a column is about is read from its position, never from this
+		// text.
+		headers := naming.Abbrev(t.Current.Cluster.Config.Nodes)
 		for i, nodename := range t.Current.Cluster.Config.Nodes {
-			t.objects.SetCell(row, t.firstInstanceCol+i, t.cellNode(nodename, selectable))
+			t.objects.SetCell(row, t.firstInstanceCol+i, t.cellNode(nodename, headers[i], selectable))
 		}
 	}
 
@@ -175,7 +198,9 @@ func (t *App) updateObjects() {
 	nodesLoadCells := func(row int) { nodesPopulate(row, false, func(n string) string { return t.StrNodeLoad(n) }) }
 	nodesMemCells := func(row int) { nodesPopulate(row, false, func(n string) string { return t.StrNodeMem(n) }) }
 	nodesSwapCells := func(row int) { nodesPopulate(row, false, func(n string) string { return t.StrNodeSwap(n) }) }
-	nodesStateCells := func(row int) { nodesPopulate(row, false, func(n string) string { return t.StrNodeStates(n) }) }
+	// The states of a node with an issue end with a mark. The cell is
+	// selectable so that the mark can be followed to what it is about.
+	nodesStateCells := func(row int) { nodesPopulate(row, true, func(n string) string { return t.StrNodeStates(n) }) }
 	nodesHbCells := func(row int) { nodesPopulate(row, true, func(n string) string { return t.StrNodeHbMode(n) }) }
 	nodesHb1Cells := func(row int, hbType string) {
 		nodesPopulate(row, true, func(n string) string { return t.StrHeartbeat(n, hbType) })
@@ -285,6 +310,7 @@ func (t *App) updateObjects() {
 		}
 	}
 
+	stateIndexRow = len(objects)
 	objects = append(objects,
 		HeaderObject{
 			Left:     HeaderCell{},
@@ -366,12 +392,24 @@ func (t *App) cellInstanceStatus(path, node string) *tview.TableCell {
 	return cell
 }
 
-func (t *App) cellNode(node string, selectable bool) *tview.TableCell {
-	cell := tview.NewTableCell(node).SetAttributes(tcell.AttrBold).SetSelectable(selectable)
+// cellNode renders the header of a node column. The node is what the column
+// is about, the header is how the name is shown, which may be abbreviated.
+func (t *App) cellNode(node, header string, selectable bool) *tview.TableCell {
+	cell := tview.NewTableCell(header).SetAttributes(tcell.AttrBold).SetSelectable(selectable)
 	if selectable && t.isNodeSelected(node) {
 		cell.SetBackgroundColor(colorSelected)
 	}
 	return cell
+}
+
+// nodeIssues returns the configuration faults the node reports about
+// itself.
+func (t *App) nodeIssues(node string) []string {
+	nodeData, ok := t.Current.Cluster.Node[node]
+	if !ok {
+		return nil
+	}
+	return nodeData.Config.Issues
 }
 
 func (t *App) cellObjectPath(path string) *tview.TableCell {

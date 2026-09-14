@@ -10,13 +10,8 @@ import (
 
 var (
 	cmdNode             = commoncmd.NewCmdNode()
-	cmdNodeCapabilities = &cobra.Command{
-		GroupID: commoncmd.GroupIDSubsystems,
-		Use:     "capabilities",
-		Short:   "scan and list what the node is capable of",
-		Aliases: []string{"capa", "caps", "cap"},
-	}
-	cmdNodeCollector = &cobra.Command{
+	cmdNodeCapabilities = commoncmd.NewCmdNodeCapabilities()
+	cmdNodeCollector    = &cobra.Command{
 		GroupID: commoncmd.GroupIDSubsystems,
 		Use:     "collector",
 		Short:   "node collector data management commands",
@@ -27,29 +22,16 @@ var (
 		Use:     "tag",
 		Short:   "collector tags management commands",
 	}
-	cmdNodeCompliance = &cobra.Command{
-		GroupID: commoncmd.GroupIDSubsystems,
-		Use:     "compliance",
-		Short:   "node configuration manager commands",
-		Aliases: []string{"comp"},
-	}
-	cmdNodeConfig = &cobra.Command{
+	cmdNodeCompliance = commoncmd.NewCmdNodeCompliance()
+	cmdNodeConfig     = &cobra.Command{
 		GroupID: commoncmd.GroupIDSubsystems,
 		Use:     "config",
 		Short:   "configuration commands",
 		Aliases: []string{"conf", "c", "cf", "cfg"},
 	}
-	cmdNodeSCSI = &cobra.Command{
-		GroupID: commoncmd.GroupIDSubsystems,
-		Use:     "scsi",
-		Short:   "scsi commands",
-	}
-	cmdNodeRelay = &cobra.Command{
-		GroupID: commoncmd.GroupIDSubsystems,
-		Use:     "relay",
-		Short:   "relay commands",
-	}
-	cmdNodeScan = &cobra.Command{
+	cmdNodeSCSI  = commoncmd.NewCmdNodeSCSI()
+	cmdNodeRelay = commoncmd.NewCmdNodeRelay()
+	cmdNodeScan  = &cobra.Command{
 		Use:    "scan",
 		Hidden: true,
 	}
@@ -58,11 +40,7 @@ var (
 		Use:     "schedule",
 		Short:   "scheduler commands",
 	}
-	cmdNodeSSH = &cobra.Command{
-		GroupID: commoncmd.GroupIDSubsystems,
-		Use:     "ssh",
-		Short:   "ssh commands",
-	}
+	cmdNodeSSH = commoncmd.NewCmdNodeSSH()
 
 	// Backward compat
 
@@ -79,8 +57,9 @@ var (
 		Aliases: []string{"prin", "pri", "pr"},
 	}
 	cmdNodePush = &cobra.Command{
-		Use:   "push",
-		Short: "push node discover information to the collector",
+		GroupID: commoncmd.GroupIDSubsystems,
+		Use:     "push",
+		Short:   "push node discover information to the collector",
 	}
 	cmdNodeUpdate = &cobra.Command{
 		Use:    "update",
@@ -201,6 +180,7 @@ func init() {
 		newCmdNodeDrivers(),
 		newCmdNodeLogs(),
 		newCmdNodeList(),
+		commoncmd.NewCmdNodeMetrics(),
 		newCmdNodePRKey(),
 		newCmdNodePushasset(),
 		newCmdNodePushdisk(),
@@ -233,10 +213,12 @@ func init() {
 	)
 	cmdNodePush.AddCommand(
 		newCmdNodePushAsset(),
+		newCmdNodePushArray(),
 		newCmdNodePushDisk(),
 		newCmdNodePushPkg(),
 	)
 	cmdNodeRelay.AddCommand(
+		newCmdNodeRelayList(),
 		newCmdNodeRelayStatus(),
 	)
 	cmdNodeScan.AddCommand(

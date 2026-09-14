@@ -188,7 +188,7 @@ func (t *CmdObjectCreate) do() error {
 	}
 }
 
-func (t CmdObjectCreate) fromPath(p naming.Path) error {
+func (t *CmdObjectCreate) fromPath(p naming.Path) error {
 	cmd := CmdObjectConfigShow{}
 	b, err := cmd.extractPath(p, t.client)
 	if err != nil {
@@ -204,7 +204,7 @@ func (t CmdObjectCreate) fromPath(p naming.Path) error {
 	return t.fromData(p, b)
 }
 
-func (t CmdObjectCreate) fromTemplate(template string) error {
+func (t *CmdObjectCreate) fromTemplate(template string) error {
 	if b, err := commoncmd.DataFromTemplate(template); err != nil {
 		return err
 	} else {
@@ -212,7 +212,7 @@ func (t CmdObjectCreate) fromTemplate(template string) error {
 	}
 }
 
-func (t CmdObjectCreate) fromConfig() error {
+func (t *CmdObjectCreate) fromConfig() error {
 	b, err := t.dataFromConfig()
 	if err != nil {
 		return err
@@ -220,11 +220,11 @@ func (t CmdObjectCreate) fromConfig() error {
 	return t.fromData(t.path, b)
 }
 
-func (t CmdObjectCreate) fromScratch() error {
+func (t *CmdObjectCreate) fromScratch() error {
 	return t.fromData(t.path, nil)
 }
 
-func (t CmdObjectCreate) fromStdin() error {
+func (t *CmdObjectCreate) fromStdin() error {
 	b, err := commoncmd.DataFromStdin()
 	if err != nil {
 		return err
@@ -232,19 +232,19 @@ func (t CmdObjectCreate) fromStdin() error {
 	return t.fromData(t.path, b)
 }
 
-func (t CmdObjectCreate) dataFromConfig() ([]byte, error) {
+func (t *CmdObjectCreate) dataFromConfig() ([]byte, error) {
 	u := uri.New(t.Config)
 	switch {
 	case file.Exists(t.Config):
 		return commoncmd.DataFromConfigFile(t.Config)
-	case u.IsValid():
-		return commoncmd.DataFromConfigURI(u)
+	case u.IsValidHttp():
+		return commoncmd.DataFromConfigHttp(u)
 	default:
 		return nil, fmt.Errorf("invalid configuration: %s is not a file, nor an uri", t.Config)
 	}
 }
 
-func (t CmdObjectCreate) fromData(p naming.Path, b []byte) error {
+func (t *CmdObjectCreate) fromData(p naming.Path, b []byte) error {
 	if !t.Force && !t.Restore && p.Exists() {
 		return fmt.Errorf("%s already exists", p)
 	}
@@ -252,6 +252,11 @@ func (t CmdObjectCreate) fromData(p naming.Path, b []byte) error {
 	if err != nil {
 		return err
 	}
+
+	// Write the new configuration with a "[DEFAULT]" header, as OpenSVC v2
+	// did, so the keywords of that section are grouped under it whatever
+	// their rank in the keyword list.
+	oc.Config().MaterializeDefaultSection()
 
 	ops := keyop.ParseOps(t.Keywords)
 	if !t.Restore {
@@ -278,7 +283,7 @@ func (t CmdObjectCreate) fromData(p naming.Path, b []byte) error {
 	return nil
 }
 
-func (t CmdObjectCreate) localEmpty(p naming.Path) error {
+func (t *CmdObjectCreate) localEmpty(p naming.Path) error {
 	if !t.Force && p.Exists() {
 		return fmt.Errorf("%s already exists", p)
 	}

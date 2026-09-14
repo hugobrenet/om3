@@ -163,6 +163,8 @@ var (
 
 		"InstanceMonitorUpdated": func() any { return &InstanceMonitorUpdated{} },
 
+		"InstanceResourceInfoUpdated": func() any { return &InstanceResourceInfoUpdated{} },
+
 		"InstanceStatusDeleted": func() any { return &InstanceStatusDeleted{} },
 
 		"InstanceStatusPost": func() any { return &InstanceStatusPost{} },
@@ -273,6 +275,10 @@ var (
 		"NetLinkUp":   func() any { return &NetLinkUp{} },
 		"NetIPAddrAdded":   func() any { return &NetIPAddrAdded{} },
 		"NetIPAddrDeleted": func() any { return &NetIPAddrDeleted{} },
+
+		"FSMounted":   func() any { return &FSMounted{} },
+		"FSUmounted":  func() any { return &FSUmounted{} },
+		"FSRemounted": func() any { return &FSRemounted{} },
 	}
 )
 
@@ -600,6 +606,18 @@ type (
 		Path       naming.Path      `json:"path" yaml:"path"`
 		Node       string           `json:"node" yaml:"node"`
 		Value      instance.Monitor `json:"instance_monitor" yaml:"instance_monitor"`
+	}
+
+	// InstanceResourceInfoUpdated is emitted when a node refreshed the resource
+	// info cache of one of its instances. It is a signal only: the key-values
+	// are not carried, the collector speaker fetches them from Node with the
+	// GetInstanceResourceInfo api when it is ready to report them.
+	InstanceResourceInfoUpdated struct {
+		pubsub.Msg `yaml:",inline"`
+		Path       naming.Path `json:"path" yaml:"path"`
+		Node       string      `json:"node" yaml:"node"`
+		Checksum   string      `json:"checksum" yaml:"checksum"`
+		UpdatedAt  time.Time   `json:"updated_at" yaml:"updated_at"`
 	}
 
 	InstanceStatusDeleted struct {
@@ -1013,6 +1031,36 @@ type (
 		LinkName   string `json:"link_name" yaml:"link_name"`
 		Address    string `json:"address" yaml:"address"`
 	}
+
+	// FSMounted is published when a filesystem is mounted
+	FSMounted struct {
+		pubsub.Msg `yaml:",inline"`
+		Node       string `json:"node" yaml:"node"`
+		MountPoint string `json:"mount_point" yaml:"mount_point"`
+		FSType     string `json:"fs_type" yaml:"fs_type"`
+		Source     string `json:"source" yaml:"source"`
+		Options    string `json:"options" yaml:"options"`
+	}
+
+	// FSUmounted is published when a filesystem is unmounted
+	FSUmounted struct {
+		pubsub.Msg `yaml:",inline"`
+		Node       string `json:"node" yaml:"node"`
+		MountPoint string `json:"mount_point" yaml:"mount_point"`
+		FSType     string `json:"fs_type" yaml:"fs_type"`
+		Source     string `json:"source" yaml:"source"`
+		Options    string `json:"options" yaml:"options"`
+	}
+
+	// FSRemounted is published when a filesystem is remounted
+	FSRemounted struct {
+		pubsub.Msg `yaml:",inline"`
+		Node       string `json:"node" yaml:"node"`
+		MountPoint string `json:"mount_point" yaml:"mount_point"`
+		FSType     string `json:"fs_type" yaml:"fs_type"`
+		Source     string `json:"source" yaml:"source"`
+		Options    string `json:"options" yaml:"options"`
+	}
 )
 
 func DropPendingMsg(c <-chan any, duration time.Duration) {
@@ -1250,6 +1298,14 @@ func (e *InstanceMonitorUpdated) Kind() string {
 
 func (e *InstanceMonitorUpdated) Key() string {
 	return fmt.Sprintf("InstanceMonitorUpdated,path=%s,node=%s", e.Path, e.Node)
+}
+
+func (e *InstanceResourceInfoUpdated) Kind() string {
+	return "InstanceResourceInfoUpdated"
+}
+
+func (e *InstanceResourceInfoUpdated) Key() string {
+	return fmt.Sprintf("InstanceResourceInfoUpdated,path=%s,node=%s", e.Path, e.Node)
 }
 
 func (e *InstanceStatusDeleted) Kind() string {
@@ -1562,6 +1618,30 @@ func (e *NetIPAddrDeleted) Kind() string {
 
 func (e *NetIPAddrDeleted) Key() string {
 	return fmt.Sprintf("NetIPAddrDeleted,node=%s,link_name=%s,address=%s", e.Node, e.LinkName, e.Address)
+}
+
+func (e *FSMounted) Kind() string {
+	return "FSMounted"
+}
+
+func (e *FSMounted) Key() string {
+	return fmt.Sprintf("FSMounted,node=%s,mount_point=%s", e.Node, e.MountPoint)
+}
+
+func (e *FSUmounted) Kind() string {
+	return "FSUmounted"
+}
+
+func (e *FSUmounted) Key() string {
+	return fmt.Sprintf("FSUmounted,node=%s,mount_point=%s", e.Node, e.MountPoint)
+}
+
+func (e *FSRemounted) Kind() string {
+	return "FSRemounted"
+}
+
+func (e *FSRemounted) Key() string {
+	return fmt.Sprintf("FSRemounted,node=%s,mount_point=%s", e.Node, e.MountPoint)
 }
 
 func NewSetInstanceMonitorWithErr(ctx context.Context, p naming.Path, nodename string, value instance.MonitorUpdate) (*SetInstanceMonitor, errcontext.ErrReceiver) {

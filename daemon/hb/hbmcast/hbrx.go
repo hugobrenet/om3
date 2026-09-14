@@ -9,14 +9,13 @@ import (
 	"net"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/opensvc/om3/v3/core/hbtype"
-	"github.com/opensvc/om3/v3/core/omcrypto"
 	"github.com/opensvc/om3/v3/daemon/hb/hbaudit"
 	"github.com/opensvc/om3/v3/daemon/hb/hbcrypto"
 	"github.com/opensvc/om3/v3/daemon/hb/hbctrl"
+	"github.com/opensvc/om3/v3/daemon/hb/hbdedup"
 	"github.com/opensvc/om3/v3/util/hostname"
 	"github.com/opensvc/om3/v3/util/plog"
 )
@@ -39,7 +38,16 @@ type (
 		msgC   chan<- *hbtype.Msg
 		cancel func()
 
-		crypto atomic.Pointer[omcrypto.T]
+		// crypto decrypts with the crypto current at call time: the
+		// receiver outlives heartbeat secret rotations.
+		crypto hbcrypto.Loader
+
+		// dedup holds the frames the other hb links already delivered
+		dedup *hbdedup.Cache
+
+		// sent holds this node's own recent message ids, so its own
+		// multicast can be dropped on the fragment header
+		sent *selfIDs
 	}
 	assembly map[string]msgMap
 	msgMap   map[string]dataMap
@@ -122,7 +130,8 @@ func (t *rx) Start(cmdC chan<- interface{}, msgC chan<- *hbtype.Msg) error {
 			}
 		}()
 		started <- true
-		t.crypto = *hbcrypto.CryptoFromContext(ctx)
+		t.crypto = hbcrypto.LoaderFromContext(ctx)
+		t.dedup = hbdedup.CacheFromContext(ctx)
 		b := make([]byte, MaxDatagramSize)
 		for {
 			n, src, err := listener.ReadFromUDP(b)
@@ -146,16 +155,23 @@ func (t *rx) Start(cmdC chan<- interface{}, msgC chan<- *hbtype.Msg) error {
 
 func (t *rx) recv(src *net.UDPAddr, n int, b []byte) {
 	s := fmt.Sprint(src)
-	f := fragment{}
 	b = b[:n]
-	//fmt.Println("xx <<<\n", hex.Dump(b))
-	if err := json.Unmarshal(b, &f); err != nil {
-		t.log.Warnf("unmarshal fragment from src %s: %s", s, err)
+	f, err := decodeFragment(b)
+	if err != nil {
+		t.log.Warnf("decode fragment from src %s: %s", s, err)
 		return
 	}
 
 	if f.MsgID == "" {
 		t.log.Tracef("not a udp message frame")
+		return
+	}
+	if t.sent.has(f.MsgID) {
+		// Our own multicast, coming back to us. Dropped here rather than
+		// after the message it belongs to has been reassembled and
+		// decrypted, which is where the nodename that identifies it as
+		// ours can first be read.
+		t.log.Tracef("recv: drop own fragment")
 		return
 	}
 	// verify message DoS
@@ -214,9 +230,20 @@ func (t *rx) recv(src *net.UDPAddr, n int, b []byte) {
 	} else {
 		encMsg = chunks[1]
 	}
-	crypto := t.crypto.Load()
+	key := hbdedup.NewKey(encMsg)
+	if nodename, ok := t.dedup.Seen(key); ok {
+		// another hb link delivered this very frame: the peer is alive on
+		// this one too, but the message is already in the daemon
+		t.log.Tracef("recv: msg from %s already delivered by another hb", s)
+		t.cmdC <- hbctrl.CmdSetPeerSuccess{
+			Nodename: nodename,
+			HbID:     t.id,
+			Success:  true,
+		}
+		return
+	}
 
-	b, err := crypto.Decrypt(encMsg)
+	b, err = t.crypto.Decrypt(encMsg)
 	if err != nil {
 		t.log.Tracef("recv: decrypting msg from %s: %s: %s", s, hex.Dump(encMsg), err)
 		return
@@ -227,6 +254,13 @@ func (t *rx) recv(src *net.UDPAddr, n int, b []byte) {
 		return
 	}
 	if data.Nodename == hostname.Hostname() {
+		// Our own multicast, coming back to us. The fragment header check
+		// above catches these first now; this stays as the backstop for
+		// what it cannot see, a datagram from a tx that has since
+		// restarted, or one whose id has aged out of the ring. Not
+		// recorded as delivered: it never reaches the daemon, and a peer
+		// frame can't collide with it on the nodename the dedup would
+		// then serve.
 		t.log.Tracef("recv: drop msg from self")
 		return
 	}
@@ -236,11 +270,13 @@ func (t *rx) recv(src *net.UDPAddr, n int, b []byte) {
 		Success:  true,
 	}
 	t.msgC <- &data
+	t.dedup.Delivered(key, data.Nodename)
 }
 
-func newRx(ctx context.Context, name string, nodes []string, udpAddr *net.UDPAddr, intf *net.Interface, timeout time.Duration) *rx {
+func newRx(ctx context.Context, name string, nodes []string, udpAddr *net.UDPAddr, intf *net.Interface, timeout time.Duration, sent *selfIDs) *rx {
 	id := name + ".rx"
 	return &rx{
+		sent:    sent,
 		ctx:     ctx,
 		id:      id,
 		nodes:   nodes,

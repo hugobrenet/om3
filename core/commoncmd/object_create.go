@@ -8,10 +8,10 @@ import (
 	"github.com/opensvc/om3/v3/util/uri"
 )
 
-func DataFromConfigURI(u uri.T) ([]byte, error) {
-	fpath, err := u.Fetch()
+func DataFromConfigHttp(u uri.T) ([]byte, error) {
+	fpath, err := u.HttpFetch()
 	if err != nil {
-		return nil, nil
+		return nil, err
 	}
 	defer os.Remove(fpath)
 	return DataFromConfigFile(fpath)

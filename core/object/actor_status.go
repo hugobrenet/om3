@@ -124,8 +124,6 @@ func (t *actor) lockedMonitorStatusEval(ctx context.Context, data instance.Statu
 		return data, fmt.Errorf("resource status eval: %w", err)
 	}
 	if len(data.Resources) == 0 {
-		data.Avail = status.NotApplicable
-		data.Overall = status.NotApplicable
 		data.Optional = status.NotApplicable
 	}
 	var err error
@@ -145,8 +143,6 @@ func (t *actor) lockedStatusEval(ctx context.Context) (instance.Status, error) {
 		return data, fmt.Errorf("resource status eval: %w", err)
 	}
 	if len(data.Resources) == 0 {
-		data.Avail = status.NotApplicable
-		data.Overall = status.NotApplicable
 		data.Optional = status.NotApplicable
 	}
 	var err error
@@ -190,6 +186,24 @@ func (t *actor) isEncapNodeMatchingResource(r resource.Driver) (bool, error) {
 }
 
 func (t *actor) resourceStatusEval(ctx context.Context, data *instance.Status, monitoredOnly bool) error {
+	// The resources are configured once here, and not again before each of
+	// them is evaluated.
+	//
+	// An action configures a resource again right before it acts, because a
+	// keyword of one resource can reference what another resource exposes
+	// once started, and that value only exists after the referenced resource
+	// has run. Evaluating the status changes no state, so nothing a keyword
+	// reads can move between here and the end of the pass, and configuring
+	// each resource a second time on its turn would evaluate every keyword of
+	// the object twice for one status.
+	//
+	// This also rebuilds the resources, which is what keeps the status
+	// refresh that closes an action from reading what the action saw: the
+	// drivers it evaluates are not the ones the action just used, so whatever
+	// they had cached while changing the state is gone. That separation is a
+	// policy, not an optimisation, and it is this call that holds it.
+	t.ConfigureResources()
+
 	if !monitoredOnly {
 		data.Resources = make(instance.ResourceStatuses)
 	}
@@ -293,6 +307,16 @@ func (t *actor) resourceStatusEval(ctx context.Context, data *instance.Status, m
 		return nil
 	})
 	mu.Lock()
+	// No resource contributed to the aggregated status when the object has no
+	// resources at all, or when all its resources are excluded from the
+	// aggregation, like the task and sync ones for avail. Report not
+	// applicable instead of leaving the zero value undef.
+	if data.Avail == status.Undef {
+		data.Avail = status.NotApplicable
+	}
+	if data.Overall == status.Undef {
+		data.Overall = status.NotApplicable
+	}
 	sb.Post("avail", data.Avail, false)
 	sb.Post("overall", data.Overall, false)
 	mu.Unlock()

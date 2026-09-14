@@ -5,14 +5,13 @@ import "github.com/opensvc/om3/v3/core/commoncmd"
 func init() {
 	kind := "usr"
 
-	cmdObject := newCmdUsr()
+	cmdObject := commoncmd.NewCmdUsr()
 	cmdObjectCertificate := newCmdObjectCertificate(kind)
 	cmdObjectConfig := commoncmd.NewCmdObjectConfig(kind)
 	cmdObjectEdit := newCmdObjectEdit(kind)
-	cmdObjectKey := commoncmd.NewCmdObjectKey(kind)
 	cmdObjectInstance := commoncmd.NewCmdObjectInstance(kind)
 	cmdObjectSet := newCmdObjectSet(kind)
-	cmdObjectPrint := newCmdObjectPrint(kind)
+	cmdObjectPrint := commoncmd.NewCmdObjectPrint(kind)
 	cmdObjectPrintConfig := newCmdObjectPrintConfig(kind)
 	cmdObjectValidate := newCmdObjectValidate(kind)
 
@@ -20,7 +19,7 @@ func init() {
 		cmdObject,
 	)
 	cmdObject.AddGroup(
-		commoncmd.NewGroupOrchestratedActions(),
+		commoncmd.NewGroupOrchestrated(),
 		commoncmd.NewGroupQuery(),
 		commoncmd.NewGroupSubsystems(),
 	)
@@ -28,7 +27,6 @@ func init() {
 		cmdObjectCertificate,
 		cmdObjectConfig,
 		cmdObjectEdit,
-		cmdObjectKey,
 		cmdObjectInstance,
 		cmdObjectPrint,
 		cmdObjectSet,
@@ -38,7 +36,7 @@ func init() {
 		newCmdDataStoreDecode(kind),
 		newCmdDataStoreKeys(kind),
 		newCmdDataStoreRemove(kind),
-		newCmdDataStoreRename(kind),
+		newCmdObjectKey(kind),
 		newCmdObjectCreate(kind),
 		newCmdObjectDelete(kind),
 		newCmdObjectEval(kind),
@@ -68,16 +66,6 @@ func init() {
 	)
 	cmdObjectEdit.AddCommand(
 		newCmdObjectEditConfig(kind),
-	)
-	cmdObjectKey.AddCommand(
-		newCmdObjectKeyAdd(kind),
-		newCmdObjectKeyChange(kind),
-		newCmdObjectKeyDecode(kind),
-		newCmdObjectKeyEdit(kind),
-		newCmdObjectKeyInstall(kind),
-		newCmdObjectKeyList(kind),
-		newCmdObjectKeyRemove(kind),
-		newCmdObjectKeyRename(kind),
 	)
 	cmdObjectInstance.AddCommand(
 		newCmdObjectInstanceList(kind),

@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"text/template"
 
+	"github.com/anmitsu/go-shlex"
 	"golang.org/x/sys/unix"
 
 	"github.com/opensvc/om3/v3/core/keywords"
@@ -24,9 +25,11 @@ import (
 	"github.com/opensvc/om3/v3/core/resource"
 	"github.com/opensvc/om3/v3/core/volsignal"
 	"github.com/opensvc/om3/v3/core/xconfig"
+	"github.com/opensvc/om3/v3/util/converters"
 	"github.com/opensvc/om3/v3/util/file"
 	"github.com/opensvc/om3/v3/util/key"
 	"github.com/opensvc/om3/v3/util/plog"
+	"github.com/opensvc/om3/v3/util/uri"
 )
 
 // seedKeyFromSource fetches data from a URI or local file and adds it as a key to the datastore.
@@ -39,10 +42,14 @@ func seedKeyFromSource(ds object.DataStore, keyName, sourceURI string, log *plog
 	var data []byte
 	var err error
 
-	// Check if source is a local file path or a URI
-	if strings.HasPrefix(sourceURI, "http://") || strings.HasPrefix(sourceURI, "https://") {
-		// Fetch data from the HTTP/HTTPS URI
-		resp, err := http.Get(sourceURI)
+	// Retrieve date from http url or a local file
+	if uri.IsValidHttp(sourceURI) {
+		var resp *http.Response
+		client, err := uri.SafeHttpClient(sourceURI)
+		if err != nil {
+			return fmt.Errorf("failed to create http client for %s: %w", sourceURI, err)
+		}
+		resp, err = client.Get(sourceURI)
 		if err != nil {
 			return fmt.Errorf("failed to fetch from %s: %w", sourceURI, err)
 		}
@@ -244,7 +251,7 @@ func Keywords(prefix string) []*keywords.Keyword {
 	return []*keywords.Keyword{
 		{
 			Attr:      prefix + "Install",
-			Converter: "shlex",
+			Converter: converters.Shlex,
 			Example: `
 		/etc/ mode 0750 user 1000 group 1000
 		/etc/ssl/ mode 0700 user 1000 group 1000
@@ -262,7 +269,7 @@ func Keywords(prefix string) []*keywords.Keyword {
 		},
 		{
 			Attr:      prefix + "Configs",
-			Converter: "shlex",
+			Converter: converters.Shlex,
 			Example:   "conf/mycnf:/etc/mysql/my.cnf:ro conf/sysctl:/etc/sysctl.d/01-db.conf",
 			Option:    "configs",
 			Scopable:  true,
@@ -270,7 +277,7 @@ func Keywords(prefix string) []*keywords.Keyword {
 		},
 		{
 			Attr:      prefix + "Secrets",
-			Converter: "shlex",
+			Converter: converters.Shlex,
 			Default:   "",
 			Example:   "cert/pem:server.pem cert/key:server.key",
 			Option:    "secrets",
@@ -280,7 +287,7 @@ func Keywords(prefix string) []*keywords.Keyword {
 		},
 		{
 			Attr:      prefix + "Directories",
-			Converter: "list",
+			Converter: converters.List,
 			Default:   "",
 			Example:   "a/b/c d /e",
 			Option:    "directories",
@@ -303,7 +310,7 @@ func Keywords(prefix string) []*keywords.Keyword {
 		},
 		{
 			Attr:        prefix + "Perm",
-			Converter:   "filemode",
+			Converter:   converters.FileMode,
 			DefaultText: keywords.NewText(fs, "text/kw/perm.default"),
 			Example:     "660",
 			Option:      "perm",
@@ -312,7 +319,7 @@ func Keywords(prefix string) []*keywords.Keyword {
 		},
 		{
 			Attr:        prefix + "DirPerm",
-			Converter:   "filemode",
+			Converter:   converters.FileMode,
 			DefaultText: keywords.NewText(fs, "text/kw/dirperm.default"),
 			Example:     "750",
 			Option:      "dirperm",
@@ -1182,4 +1189,39 @@ func (t *DataRecv) installDirs() error {
 		}
 	}
 	return nil
+}
+
+// TextHasLocalSource reports whether an install text names a source the server
+// reads locally, as opposed to one it fetches over http.
+//
+// It lives here, next to the grammar it parses, so the rbac policy that refuses
+// a local source to a user holding no root grant does not have to reimplement
+// that grammar and drift from it.
+func TextHasLocalSource(s string) bool {
+	text, _ := shlex.Split(s, true)
+	for _, line := range Split(text) {
+		if lineHasLocalSource(line) {
+			return true
+		}
+	}
+	return false
+}
+
+// lineHasLocalSource reports whether one install line names a local source.
+func lineHasLocalSource(words []string) bool {
+	var word string
+	for {
+		word, words = Pop(words)
+		if word == "" {
+			break
+		}
+		switch word {
+		case "source":
+			word, words = Pop(words)
+			if !strings.HasPrefix(word, "http://") && !strings.HasPrefix(word, "https://") {
+				return true
+			}
+		}
+	}
+	return false
 }

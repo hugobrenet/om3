@@ -68,7 +68,7 @@ func (t *App) updateKeysView() {
 	if t.skipIfConfigNotUpdated() {
 		return
 	}
-	resp, err := t.client.GetObjectDataKeysWithResponse(context.Background(), t.viewPath.Namespace, t.viewPath.Kind, t.viewPath.Name)
+	resp, err := t.client.GetObjectDataKeysWithResponse(context.Background(), t.viewPath.Namespace, t.viewPath.Kind, t.viewPath.Name, nil)
 	if err != nil {
 		return
 	}
@@ -108,7 +108,9 @@ func (t *App) updateKeyTextView() {
 		return
 	}
 
-	t.initTextView()
+	if t.textView == nil {
+		return
+	}
 	text := string(resp.Body)
 	title := fmt.Sprintf("%s key %s", t.viewPath, t.viewKey)
 	t.textView.SetTitle(title)

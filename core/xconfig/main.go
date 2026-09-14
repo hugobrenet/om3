@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/cvaroqui/ini"
 	"github.com/golang-collections/collections/set"
 	"github.com/google/uuid"
 	"github.com/iancoleman/orderedmap"
@@ -26,6 +25,7 @@ import (
 	"github.com/opensvc/om3/v3/util/converters"
 	"github.com/opensvc/om3/v3/util/file"
 	"github.com/opensvc/om3/v3/util/hostname"
+	"github.com/opensvc/om3/v3/util/ini"
 	"github.com/opensvc/om3/v3/util/key"
 	"github.com/opensvc/om3/v3/util/stringslice"
 	"github.com/opensvc/om3/v3/util/xstrings"
@@ -314,7 +314,7 @@ func (t *T) HasKeyMatchingOp(kop keyop.T) bool {
 		}
 		var converter converters.Converter
 		if kw != nil {
-			converter = converters.Lookup(kw.Converter)
+			converter = kw.Converter
 		}
 		if converter == nil {
 			iv := v
@@ -730,18 +730,12 @@ func (t *T) Dump() ([]byte, error) {
 }
 
 func (t *T) write() (err error) {
-	ini.DefaultHeader = true
 	f, err := t.tempConfigFile()
 	if err != nil {
 		return err
 	}
 	fName := f.Name()
 	defer os.Remove(fName)
-
-	ini.PrettyEqual = false
-	ini.PrettyFormat = false
-	ini.DefaultFormatLeft = " "
-	ini.DefaultFormatRight = " "
 
 	if _, err = t.file.WriteTo(f); err != nil {
 		return err
@@ -926,11 +920,10 @@ func (t *T) evalDescopeStringAs(k key.T, kw *keywords.Keyword, impersonate strin
 }
 
 func (t *T) convert(v string, kw *keywords.Keyword) (any, error) {
-	converter := converters.Lookup(kw.Converter)
-	if converter == nil {
+	if kw.Converter == nil {
 		return v, nil
 	}
-	return converter.Convert(v)
+	return kw.Converter.Convert(v)
 }
 
 func (t *T) mayDescope(k key.T, kw *keywords.Keyword, impersonate string) (string, error) {
@@ -1403,6 +1396,19 @@ func (t T) deleteSection(section string) {
 		return
 	}
 	t.file.DeleteSection(section)
+}
+
+// MaterializeDefaultSection gives the DEFAULT section a header, so the
+// configuration is written with the "[DEFAULT]" line and the keywords of that
+// section are visibly grouped under it instead of floating above the first
+// driver section header.
+//
+// This is what the create codepaths do, so a new object configuration looks
+// like the OpenSVC v2 ones. A configuration that already has the header is
+// left untouched.
+func (t *T) MaterializeDefaultSection() {
+	t.file.MaterializeDefaultSection()
+	t.changed = true
 }
 
 func (t T) initDefaultSection() error {

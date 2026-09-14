@@ -13,21 +13,31 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/opensvc/om3/v3/core/client"
-	"github.com/opensvc/om3/v3/core/cluster"
 	"github.com/opensvc/om3/v3/core/clusterdump"
 	"github.com/opensvc/om3/v3/core/event"
 	"github.com/opensvc/om3/v3/core/naming"
 	"github.com/opensvc/om3/v3/core/om"
 	"github.com/opensvc/om3/v3/core/rawconfig"
+	"github.com/opensvc/om3/v3/daemon/daemonauth"
 	"github.com/opensvc/om3/v3/daemon/daemoncmd"
 	"github.com/opensvc/om3/v3/daemon/daemonenv"
 	"github.com/opensvc/om3/v3/testhelper"
 	"github.com/opensvc/om3/v3/util/plog"
 )
 
+// defaultHTTPPort is the port a daemon started with no cluster config
+// listens on. Captured here because daemon.Start overwrites
+// daemonenv.HTTPPort with the port of the config it starts with, while
+// the listener.port keyword default, which the configless daemon uses,
+// keeps the value this package var holds.
+var defaultHTTPPort = daemonenv.HTTPPort
+
 func newClient(serverUrl string) (*client.T, error) {
-	return client.New(client.WithURL(serverUrl), client.WithPassword(cluster.ConfigData.Get().Secret()))
-	//return client.New(client.WithURL(serverUrl), client.WithInsecureSkipVerify(true))
+	tk, err := daemonauth.CreateNodeToken()
+	if err != nil {
+		return nil, err
+	}
+	return client.New(client.WithURL(serverUrl), client.WithBearer(tk))
 }
 
 func setup(t *testing.T, withConfig bool) testhelper.Env {
@@ -204,7 +214,7 @@ func runTestDaemonStartup(t *testing.T, hasConfig bool) {
 			logf("daemonCli.Stop...")
 			// Use UrlInetHttp to avoid failed stop because of still running handler
 			// cli, err := client.New(client.WithURL(getClientUrl(hasConfig)["UrlUxHttp"]))
-			cli, err := client.New(client.WithPassword(cluster.ConfigData.Get().Secret()), client.WithURL(getClientUrl(hasConfig)["UrlInetHttp"]))
+			cli, err := newClient(getClientUrl(hasConfig)["UrlInetHttp"])
 			require.NoError(t, err)
 			daemonCli = daemoncmd.New(cli)
 			e := daemonCli.StopWithoutManager()
@@ -249,6 +259,12 @@ func TestDaemonStartupWithConfig(t *testing.T) {
 func TestDaemonStartupWithoutConfig(t *testing.T) {
 	if runtime.GOOS != "darwin" && os.Getuid() != 0 {
 		t.Skip("skipped for non root user")
+	}
+	// This one starts a daemon with no cluster config, so it can't be told
+	// to listen elsewhere: the port comes from the listener.port keyword
+	// default. A daemon alive on this node holds it.
+	if err := testhelper.TCPPortAvailable(fmt.Sprint(defaultHTTPPort)); err != nil {
+		t.Skipf("skipped: a daemon started without config needs port %d: %s", defaultHTTPPort, err)
 	}
 	runTestDaemonStartup(t, false)
 }

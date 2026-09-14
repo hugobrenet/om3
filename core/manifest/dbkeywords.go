@@ -4,6 +4,7 @@ import (
 	"embed"
 
 	"github.com/opensvc/om3/v3/core/keywords"
+	"github.com/opensvc/om3/v3/util/converters"
 )
 
 //go:embed text
@@ -82,7 +83,7 @@ var (
 
 	KWDisable = keywords.Keyword{
 		Attr:      "Disable",
-		Converter: "bool",
+		Converter: converters.Bool,
 		Option:    "disable",
 		Scopable:  true,
 		Text:      keywords.NewText(fs, "text/kw/disable"),
@@ -90,7 +91,7 @@ var (
 
 	KWEnableProvision = keywords.Keyword{
 		Attr:      "EnableProvision",
-		Converter: "bool",
+		Converter: converters.Bool,
 		Default:   "true",
 		Option:    "provision",
 		Text:      keywords.NewText(fs, "text/kw/provision"),
@@ -98,7 +99,7 @@ var (
 
 	KWEnableUnprovision = keywords.Keyword{
 		Attr:      "EnableUnprovision",
-		Converter: "bool",
+		Converter: converters.Bool,
 		Default:   "true",
 		Option:    "unprovision",
 		Text:      keywords.NewText(fs, "text/kw/unprovision"),
@@ -106,14 +107,14 @@ var (
 
 	KWEncap = keywords.Keyword{
 		Attr:      "Encap",
-		Converter: "bool",
+		Converter: converters.Bool,
 		Option:    "encap",
 		Text:      keywords.NewText(fs, "text/kw/encap"),
 	}
 
 	KWMonitor = keywords.Keyword{
 		Attr:      "Monitor",
-		Converter: "bool",
+		Converter: converters.Bool,
 		Option:    "monitor",
 		Scopable:  true,
 		Text:      keywords.NewText(fs, "text/kw/monitor"),
@@ -121,7 +122,7 @@ var (
 
 	KWOptional = keywords.Keyword{
 		Attr:      "Optional",
-		Converter: "bool",
+		Converter: converters.Bool,
 		Inherit:   keywords.InheritHead2Leaf,
 		Option:    "optional",
 		Scopable:  true,
@@ -139,63 +140,63 @@ var (
 		Attr:     "PostRun",
 		Option:   "post_run",
 		Scopable: true,
-		Text:     keywords.NewText(fs, "text/kw/post_provision"),
+		Text:     keywords.NewText(fs, "text/kw/post_run"),
 	}
 
 	KWPostStart = keywords.Keyword{
 		Attr:     "PostStart",
 		Option:   "post_start",
 		Scopable: true,
-		Text:     keywords.NewText(fs, "text/kw/post_provision"),
+		Text:     keywords.NewText(fs, "text/kw/post_start"),
 	}
 
 	KWPostStop = keywords.Keyword{
 		Attr:     "PostStop",
 		Option:   "post_stop",
 		Scopable: true,
-		Text:     keywords.NewText(fs, "text/kw/post_provision"),
+		Text:     keywords.NewText(fs, "text/kw/post_stop"),
 	}
 
 	KWPostUnprovision = keywords.Keyword{
 		Attr:     "PostUnprovision",
 		Option:   "post_unprovision",
 		Scopable: true,
-		Text:     keywords.NewText(fs, "text/kw/post_provision"),
+		Text:     keywords.NewText(fs, "text/kw/post_unprovision"),
 	}
 
 	KWPreProvision = keywords.Keyword{
 		Attr:     "PreProvision",
 		Option:   "pre_provision",
 		Scopable: true,
-		Text:     keywords.NewText(fs, "text/kw/post_provision"),
+		Text:     keywords.NewText(fs, "text/kw/pre_provision"),
 	}
 
 	KWPreRun = keywords.Keyword{
 		Attr:     "PreRun",
 		Option:   "pre_run",
 		Scopable: true,
-		Text:     keywords.NewText(fs, "text/kw/post_provision"),
+		Text:     keywords.NewText(fs, "text/kw/pre_run"),
 	}
 
 	KWPreStart = keywords.Keyword{
 		Attr:     "PreStart",
 		Option:   "pre_start",
 		Scopable: true,
-		Text:     keywords.NewText(fs, "text/kw/post_provision"),
+		Text:     keywords.NewText(fs, "text/kw/pre_start"),
 	}
 
 	KWPreStop = keywords.Keyword{
 		Attr:     "PreStop",
 		Option:   "pre_stop",
 		Scopable: true,
-		Text:     keywords.NewText(fs, "text/kw/post_provision"),
+		Text:     keywords.NewText(fs, "text/kw/pre_stop"),
 	}
 
 	KWPreUnprovision = keywords.Keyword{
 		Attr:     "PreUnprovision",
 		Option:   "pre_unprovision",
 		Scopable: true,
-		Text:     keywords.NewText(fs, "text/kw/post_provision"),
+		Text:     keywords.NewText(fs, "text/kw/pre_unprovision"),
 	}
 
 	KWProvisionRequires = keywords.Keyword{
@@ -208,7 +209,7 @@ var (
 	KWRestart = keywords.Keyword{
 		Attr:      "Restart.Count",
 		Default:   "0",
-		Converter: "int",
+		Converter: converters.Int,
 		Option:    "restart",
 		Scopable:  true,
 		Text:      keywords.NewText(fs, "text/kw/restart"),
@@ -216,11 +217,11 @@ var (
 
 	KWRestartDelay = keywords.Keyword{
 		Attr:      "Restart.Delay",
-		Converter: "duration",
+		Converter: converters.Duration,
 		Default:   "500ms",
 		Option:    "restart_delay",
 		Scopable:  true,
-		Text:      keywords.NewText(fs, "text/kw/post_provision"),
+		Text:      keywords.NewText(fs, "text/kw/restart_delay"),
 	}
 
 	KWRunRequires = keywords.Keyword{
@@ -232,7 +233,7 @@ var (
 
 	KWSCSIPersistentReservationEnabled = keywords.Keyword{
 		Attr:      "SCSIPersistentReservation.Enabled",
-		Converter: "bool",
+		Converter: converters.Bool,
 		Option:    "scsireserv",
 		Text:      keywords.NewText(fs, "text/kw/scsireserv"),
 	}
@@ -247,7 +248,7 @@ var (
 
 	KWSCSIPersistentReservationNoPreemptAbort = keywords.Keyword{
 		Attr:      "SCSIPersistentReservation.NoPreemptAbort",
-		Converter: "bool",
+		Converter: converters.Bool,
 		Option:    "no_preempt_abort",
 		Scopable:  true,
 		Text:      keywords.NewText(fs, "text/kw/no_preempt_abort"),
@@ -255,7 +256,7 @@ var (
 
 	KWShared = keywords.Keyword{
 		Attr:      "Shared",
-		Converter: "bool",
+		Converter: converters.Bool,
 		Option:    "shared",
 		Scopable:  true,
 		Text:      keywords.NewText(fs, "text/kw/shared"),
@@ -263,7 +264,7 @@ var (
 
 	KWStandby = keywords.Keyword{
 		Attr:      "Standby",
-		Converter: "bool",
+		Converter: converters.Bool,
 		Option:    "standby",
 		Scopable:  true,
 		Text:      keywords.NewText(fs, "text/kw/standby"),
@@ -287,7 +288,7 @@ var (
 		Attr:     "Subset",
 		Option:   "subset",
 		Scopable: true,
-		Text:     keywords.NewText(fs, "text/kw/post_provision"),
+		Text:     keywords.NewText(fs, "text/kw/subset"),
 	}
 
 	KWSyncRequires = keywords.Keyword{
@@ -299,7 +300,7 @@ var (
 
 	KWTags = keywords.Keyword{
 		Attr:      "Tags",
-		Converter: "set",
+		Converter: converters.Set,
 		Option:    "tags",
 		Scopable:  true,
 		Text:      keywords.NewText(fs, "text/kw/tags"),

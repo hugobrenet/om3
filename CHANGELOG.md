@@ -14,6 +14,75 @@
     max_delay = 10m  # interpreted as 10m in om2 and om3         => Good
     ```
 
+## What's New in v3
+
+OpenSVC v3 is a major evolution, rebuilt in Go for performance, reliability, and maintainability. Beyond the migration considerations, v3 introduces exciting new capabilities:
+
+### Architecture & Performance
+
+* **Complete Go rewrite**: The agent is now written in Go, delivering a compiled, statically-linked binary with improved performance, memory safety, and lower resource footprint compared to the Python v2 agent.
+
+* **Simplified deployment**: Single binary distribution with minimal dependencies.
+
+* **OpenAPI 3 based API**: Modern RESTful API with OpenAPI 3 specification, served over both Unix socket and inet, with bearer token authentication, replacing the custom raw JSON-RPC protocol.
+
+### User Experience
+
+* **New `ox` terminal UI**: A dedicated terminal interface for real-time cluster monitoring and management, complementing the `om` CLI. Open an `ox` session to watch services move around the cluster interactively.
+
+* **Enhanced logging with journald**: All agent logs now integrate with systemd-journald, enabling fast filtering with `journalctl _COMM=om` and adding indexed attributes like `OBJ_PATH` for precise log queries.
+
+### Orchestration & Management
+
+* **Live migration for KVM**: Full support for live migration of KVM instances with data on `disk.disk` and `disk.drbd` resources using `om <svc> switch --live` and `om <svc> takeover --live` commands.
+
+* **New placement policy**: `last start` policy uses the mtime of `<objvar>/last_start` as the candidate sort key, with more recent starts having higher priority.
+
+* **Improved object labels**: Enhanced support for labeling objects, enabling better organization and selection. Labels help third-party solutions like backup tools, ingress gateways, and monitoring systems identify and handle objects appropriately.
+
+* **Better container management**: New commands for container operations including `om <svc> container ls`, `om <svc> container enter <id>`, and `om <svc> container logs <id>`.
+
+* **Task management**: New commands for task operations including `om <svc> task ls` and `om <svc> task run <id>`.
+
+* **Resource group commands**: New per-driver-group command sets for more targeted resource management.
+
+### Configuration & Operations
+
+* **Unified configuration update**: The new `update` command with `--set`, `--unset`, and `--delete` flags allows atomic commits for different types of configuration changes.
+
+* **Quiet mode**: New `--quiet` flag for instance actions disables both progress rendering and console logging, useful for scripts and automation.
+
+* **Enhanced secret management**: New commands like `om <kvstore> key rename` for better key management in secret stores.
+
+### Security
+
+* **SSRF protection for HTTP fetches**: 
+
+    All configuration, cfg, and secret 
+    values fetched from HTTP(S) URLs are now validated against SSRF policies. 
+    By default, only `https://raw.githubusercontent.com/opensvc/opensvc_templates/*` 
+    URLs are allowed, while all other URLs and private/internal CIDR ranges 
+    (including loopback, RFC 1918, link-local, TEST-NET, and IPv6 ULA) are blocked. 
+    Redirects are disabled by default. Administrators can override these defaults 
+    via environment variables in `/etc/default/opensvc` or `/etc/sysconfig/opensvc`:
+  ```
+  OSVC_SSRF_ALLOWED_URL
+  OSVC_SSRF_BLOCKED_URL
+  OSVC_SSRF_ALLOWED_CIDR
+  OSVC_SSRF_BLOCKED_CIDR
+  OSVC_SSRF_ENABLE_REDIRECTS
+  ```
+
+### Network & Storage
+
+* **Modern firewall management**: Configuration now uses nftables exclusively, with better support for large subnets including IPv6 via the new `mask_per_node` keyword.
+
+* **Improved mount monitoring**: New daemon manager (`mntmon`) for monitoring mount events and refreshing instance status when mounts change.
+
+* **Network event handling**: New daemon network monitor (`netmon`) relays netlink events to pubsub, enabling faster response to network changes.
+
+* **New install keyword**: For fs and volume resources, the new `install` keyword enables deployment of complex file trees on start, with support for sec keys, cfg keys, local files or remote URIs, file/directory nesting, and user/group/permission setup.
+
 ## Breaking Changes
 
 ### Cluster and Node Configuration
@@ -98,6 +167,16 @@
 * **References**
 
     * Drop support for arithmetic expressions in references
+
+* **Keywords renamed** (with backward compatibility)
+
+    * `resinfo_schedule` => `info_schedule`
+        The old name is still accepted as an alias, so existing
+        configurations keep working. The schedule entry it drives is now
+        named `info` instead of `push_resinfo`, and its last run is recorded
+        in `<objvar>/last_info`. An upgraded object therefore has no last run
+        for the new name and refreshes its resource info once, shortly after
+        the upgrade.
 
 * **Keywords removed:**
     * `svc_flex_cpu_low_threshold`
@@ -193,6 +272,12 @@
     * `om node abort`
         Replaced by `om cluster abort` to abort the pending cluster action orchestration.
 
+    * `om xx push resinfo`
+        Replaced by `om xx instance info --refresh`, which refreshes the
+        instance resource info cache. Feeding the collector is no longer the
+        pushing node's job: the collector speaker reports the refreshed
+        key-values on its own schedule.
+
 * **Moved** (with backward compatibility)
     * `om daemon status` => `om cluster status`
     * `om xx edit` => `om xx config edit`
@@ -208,8 +293,7 @@
     * `om xx print schedule` => `om xx instance schedule`
     * `om xx print status` => `om xx instance status`
     * `om xx print devs` => `om xx instance device`
-    * `om xx print resinfo` => `om xx resource info list`
-    * `om xx push resinfo` => `om xx resource info push`
+    * `om xx print resinfo` => `om xx instance info`
     * `om xx clear --local` => `om xx instance clear`
     * `om xx delete --local` => `om xx instance delete`
     * `om xx provision --local` => `om xx instance provision`
@@ -383,6 +467,45 @@
     Use double quotes instead of quotes, as the strings in the value part already use double quotes.
     Not mixing single and double quotes helps formatting the --filter for `om node events`.
 
+### Driver: container
+
+These changes apply to the `container.docker`, `container.podman` and
+`container.oci` drivers, and to the `task.docker` and `task.podman` drivers,
+which share the same executor.
+
+* **Changed behaviour, the resolver of a container:**
+    om writes the `/etc/resolv.conf` of the container and bind mounts it, in
+    every network mode, instead of asking the container engine for one.
+
+    The engine refuses the dns options in the network modes an object sharing
+    a namespace uses, `--net none` and `--net container:...`, and writes no
+    resolv.conf of its own for them, so a container of the pause model was
+    left with no resolver at all. A file works in every network mode, and is
+    the only way to reach a container that has no engine-managed network.
+
+    `--dns`, `--dns-opt`, `--dns-option` and `--dns-search` are dropped from
+    `run_args`: they would be a second resolver configuration, in a place that
+    no longer decides anything.
+
+* **New keyword, `dns`:**
+    The nameservers to write in the container resolv.conf after those of the
+    cluster, for a container that also has to resolve names the cluster
+    nameservers do not serve.
+
+    The order is not a preference: a resolver tries the nameservers in turn
+    and moves on only when one does not answer, and a name it is told does not
+    exist is an answer. A nameserver that does not serve the cluster zone,
+    asked first, would end the search for every object name.
+
+    A resolver reads the first 3 nameservers of the file, so a cluster already
+    naming 3 in `cluster.dns` leaves this keyword no room. The extra
+    nameservers past that count are not written, and the start logs which.
+
+* **Changed rbac, `dns` and `dns_search`:**
+    Both decide what the names in a container resolve to, now that om writes
+    the resolver rather than the engine, so both require the root grant to set
+    through the api.
+
 ### Driver: container.docker
 
     * `stop_timeout`
@@ -425,7 +548,6 @@
 ### Driver: ip
 
 * **Removed keywords:**
-    * `dns_name_suffix`
     * `provisioner`
     * `dns_update`
    
@@ -435,6 +557,63 @@
 * **Changed default:**
     The `alias` keyword default value is now `true`, activating the ip stacking behaviour.
     Setting `dev=eth0:0` still forces the address labelling mode.
+
+* **Changed default DNS search list:**
+    The fqdn of the object is no longer the first domain a container searches a
+    shortname in. The default list is now the domain of the object and each of
+    its parents: `<namespace>.<kind>.<clustername> <kind>.<clustername>
+    <clustername>`.
+
+    In v2 the fqdn was first, which let a container reach a container of the
+    same object by its hostname alone. The record is still published as
+    `<hostname>.<objectfqdn>`, so a configuration relying on the shortname must
+    now name that fqdn in the `dns_search` keyword of the container.
+
+    Containers of an instance are expected to share a netns and to reach each
+    other over 127.0.0.1, which needs no name. One ip resource carries one
+    hostname, the one of the container its `netns` keyword points at, so a
+    shared netns has one name for the whole instance rather than one per
+    container.
+
+    The `dns_name_suffix` keyword of the ip drivers is kept, and is how an
+    object with more than one address names them apart: the suffix is appended
+    to the hostname the record is published under, so a second address of the
+    same container answers to `<hostname><suffix>.<objectfqdn>`.
+
+* **Changed keyword, `ip.netns.network`:**
+    It names the om network the address is drawn from, as it does on `ip.cni`.
+    An object attaches to a cluster network with one line:
+
+    ```
+    [ip#0]
+    type = netns
+    netns = container#0
+    network = default
+    ```
+
+    The `dev`, `netmask` and `gateway` of the resource are read from that
+    network when the configuration does not set them, and an empty `name` has
+    the address allocated from it. An explicit value still wins, so a
+    configuration setting them keeps working unchanged. `dev` is no longer a
+    required keyword: a network names it.
+
+    The keyword used to hold the address of the network, in dotted notation,
+    which set the destination of the route `del_net_route` removes. That
+    destination is the connected route the kernel adds along with the address,
+    which is the address masked, and the keyword could name no other: the
+    prefix length has always come from `netmask`. It is derived now. A value
+    still in that form is reported as obsolete and ignored, and a value that is
+    neither an address nor the name of a network is refused, naming the
+    networks that exist.
+
+* **Address allocation:**
+    om allocates the addresses of its `bridge` and `routed_bridge` networks
+    itself, rather than leaving them to the `host-local` cni plugin. A resource
+    draws the same address every time it starts, from a hash of the object and
+    the rid, so an object is not renumbered by a restart and the name it is
+    published under keeps resolving to the same place. `host-local` allocates
+    the first free address instead, which moves as the neighbours of an object
+    come and go.
 
 * **Collector DNS zone:**
     This feature of the collector, used by the ip driver for one of its provisioning methods, is deprecated.
@@ -485,7 +664,6 @@
 * **Removed environment variables:**
     The following variables are no longer added to process environment during actions:
 	* `OPENSVC_SVCNAME`
-    
 	* `OPENSVC_SVC_ID`
 
 * **Changed environment variables:**
@@ -500,6 +678,9 @@
         In 2.1 the default behaviour was to try to identify the topmost process matching the start command in the process command line, and having the matching env vars, but this guess is not accurate enough as processes can change their cmdline via PRCTL or via execv.
     
         If the new behaviour is not acceptable, users can provide their own stopper via the "stop" keyword.
+
+* **Status**
+    The instance container resources are no longer considered when evaluating if the instance is sufficiently started to execute the app checker. Services that have only a container resource as witness can add a `fs.flag`.
 
 ### Object: sec
 
@@ -599,6 +780,29 @@ Where the password is the value of the `þassword` key in `system/sec/relay-v3`.
 
 * The `om node update ssh keys --node=...` command is deprecated in favor of `o[mx] cluster ssh trust` (configure the trust mesh on all cluster nodes) and `o[mx] node ssh trust` (trust the node's peers)
 
+* New `o[mx] cluster enroll --node <addr> --token-file <path>` command, moving a node from its cluster to another one
+  without a shell on that node.
+
+    The command is run against a node of the target cluster, and posts to the new `POST /cluster/enroll` endpoint. 
+    The token is an access token with the join role, created on the node to enroll: its `ca` claim is the trust anchor for that node certificate, and it authenticates the order the target cluster then posts back to it, which forks a `om cluster join` in the background. Only a token carrying the join role holds that claim, so a root token is not enough and no certificate chain is added to a root-only token.
+
+    The node to enroll must be a single node cluster. Enrolling a node that still has peers is refused with a 
+    409: nothing in the join flow tells them to drop it from their `cluster.nodes`, so they would keep it forever.
+
+    The `--join-addr` gives the location the enrolled node must use to reach the target cluster, for a node that cannot
+    resolve the target nodenames. It is refused when the cluster certificate is not valid for that host, so a mismatch
+    is reported by the command instead of failing later inside the join running on the enrolled node. It defaults to a 
+    name the certificate is valid for.
+
+    The command waits for the enrolled node heartbeat to beat in the target cluster, which is what proves the join
+    completed. Use `--wait=false` to return as soon as the node has accepted the order.
+    Beware, the node is drained: a single node cluster has nowhere to relocate its instances, so they are stopped, stay
+    down, and removed from config.
+
+* The `om cluster join` command accepts `--addr` to reach the `--node` at an explicit location, for a node that cannot
+   resolve the target nodename, and reads the token from the `OSVC_JOIN_TOKEN` environment variable when `--token` is
+   not set, so it never has to appear in the process table.
+
 ### Daemon
 
 * The daemon process name is changed from `/usr/bin/python3 -m opensvc.daemon` to `om daemon run`. Monitoring checks may need to adapt.
@@ -614,6 +818,10 @@ Where the password is the value of the `þassword` key in `system/sec/relay-v3`.
 * The daemon now resets the local_expect=started instance monitor state when a sysadmin stops a resource, preventing automatic resource restarts.
 
     In version 2.1, a partially stopped instance caused by executing om foo stop --rid xx could inadvertently be restarted by the resource monitoring subsystem.
+
+* The instance resource info is reported to the collector by the collector speaker, like the instance status already was.
+
+    Every node used to post the resource info of its own instances straight to the collector. The refreshing node now only signals its peers, and the speaker fetches the key-values and reports them on its own throttled schedule, so a cluster talks to the collector through a single node and coalesces what it sends.
 
 ### sec
 
@@ -650,6 +858,18 @@ Where the password is the value of the `þassword` key in `system/sec/relay-v3`.
 ### Network
 
 * Flush iptables rules created by om2. om3 now configures the firewall using nft only.
+
+* The nft rules moved to the `osvc` table, one per address family. They used to
+  go in `nat` and `filter`, where the base chain om adds sits on a hook and a
+  priority the standard chain of those tables already uses, which makes them
+  unrepresentable to the iptables compatibility layer: `iptables -t nat -S`
+  answered ``table `nat' is incompatible, use 'nft' tool``, and every firewall
+  driver reaching the ruleset through iptables went blind on them. netavark is
+  one of those, so no podman container of a podman-built network could start on
+  a node `om net setup` had run on.
+
+  A setup deletes the chains left in `nat` and `filter` by an earlier om, so a
+  node converts itself the first time it runs one.
 
 * Change `ips_per_node` to `mask_per_node`. The former was inadequate for large subnets (ipv6). For example, `ips_per_node=18446744073709551616` is easier expressed as `mask_per_node=64`. Backward compatibility is maintained for this release.
 

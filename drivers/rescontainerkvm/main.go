@@ -190,6 +190,9 @@ func (t *T) hasEncap() bool {
 func (t *T) isOperational(ctx context.Context) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
+	if t.QGA {
+		return t.qgaPing(ctx)
+	}
 	cmd, err := t.EncapCmd(ctx, []string{"pwd"}, []string{}, nil)
 	if err != nil {
 		t.Log().Tracef("isOperational: %s", err)
@@ -957,6 +960,9 @@ func (t *T) Abort(ctx context.Context) bool {
 }
 
 func (t *T) abortPing(hn string) bool {
+	if t.QGA {
+		return false
+	}
 	timeout := 5 * time.Second
 	t.Log().Infof("abort? checking %s availability with ping (%s)", hn, timeout)
 	isAlive, err := ping.Ping(hn, timeout)
@@ -1037,12 +1043,14 @@ func (t *T) EncapCmdWithQGA(ctx context.Context, args []string, envs []string, s
 		return nil, fmt.Errorf("EncapCmdWithQGA call with empty a 'args []string' argument")
 	}
 	cmd := &qgaCommand{
-		Ctx:   ctx,
-		Name:  t.Name,
-		Path:  args[0],
-		Args:  args[1:],
-		Envs:  envs,
-		Stdin: stdin,
+		Ctx:    ctx,
+		Name:   t.Name,
+		Path:   args[0],
+		Args:   args[1:],
+		Envs:   envs,
+		Stdin:  stdin,
+		varDir: t.VarDir(),
+		logger: t.Log(),
 	}
 	return cmd, nil
 }
@@ -1082,4 +1090,15 @@ func (t *T) GetOsvcRootPath() string {
 		return filepath.Join(t.OsvcRootPath, "bin", "om")
 	}
 	return filepath.Join(rawconfig.Paths.Bin, "om")
+}
+
+func (t *T) qgaPing(ctx context.Context) (bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	err := qgaPing(ctx, t.Name)
+	if err != nil {
+		t.Log().Tracef("qgaPing: %s", err)
+		return false, nil
+	}
+	return true, nil
 }

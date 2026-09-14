@@ -23,10 +23,17 @@ var (
 	ContextVar   = "OSVC_CONTEXT"
 
 	NoLogFileVar = "OSVC_NO_LOG_FILE"
+
+	// JoinTokenVar is the environment variable the "cluster join" command
+	// reads the join token from when --token is not set. The daemon uses it
+	// to hand a token to the join it forks, so the token never appears in the
+	// process command line, which any user can read.
+	JoinTokenVar = "OSVC_JOIN_TOKEN"
 )
 
 // HasDaemonOrigin returns true if the environment variable OSVC_ACTION_ORIGIN
-// is set to "daemon". The opensvc daemon sets this variable on every command
+// is set to one of the daemon origins: "daemon/monitor", "daemon/api" or
+// "daemon/scheduler". The opensvc daemon sets this variable on every command
 // it executes.
 func HasDaemonOrigin() bool {
 	switch Origin() {
@@ -38,11 +45,23 @@ func HasDaemonOrigin() bool {
 }
 
 // HasDaemonMonitorOrigin returns true if the environment variable OSVC_ACTION_ORIGIN
-// is set to "daemon/imon". The opensvc daemon sets this variable on every command
+// is set to "daemon/monitor". The opensvc daemon sets this variable on every command
 // it executes.
 func HasDaemonMonitorOrigin() bool {
 	switch Origin() {
 	case ActionOriginDaemonMonitor:
+		return true
+	default:
+		return false
+	}
+}
+
+// HasDaemonSchedulerOrigin returns true if the environment variable
+// OSVC_ACTION_ORIGIN is set to "daemon/scheduler", which the daemon sets on
+// the commands its scheduler runs.
+func HasDaemonSchedulerOrigin() bool {
+	switch Origin() {
+	case ActionOriginDaemonScheduler:
 		return true
 	default:
 		return false

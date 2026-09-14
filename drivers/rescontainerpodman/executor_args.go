@@ -34,13 +34,6 @@ func (ea *ExecutorArg) RunArgsBase(ctx context.Context) (*args.T, error) {
 			a.Append("--userns", s)
 		}
 	}
-	if a.HasOptionAndMatchingValue("--net", "(^none$|^container:.*$)") ||
-		a.HasOptionAndMatchingValue("--network", "(^none$|^container:.*$)") {
-		a.DropOptionAndAnyValue("--dns")
-		a.DropOptionAndAnyValue("--dns-opt")
-		a.DropOptionAndAnyValue("--dns-option")
-		a.DropOptionAndAnyValue("--dns-search")
-	}
 	return a, nil
 }
 

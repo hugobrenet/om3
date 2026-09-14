@@ -34,6 +34,7 @@ func (f Frame) StrObjectInstance(path string, node string, scope []string) strin
 		instanceStatus := *inst.Status
 		s += sObjectInstanceAvail(avail, instanceStatus, instanceMonitor)
 		s += sObjectInstanceOverall(instanceStatus)
+		s += sObjectInstanceRunning(instanceStatus)
 		s += sObjectInstanceDRP(instanceConfig)
 		s += sObjectInstanceHALeader(instanceMonitor)
 		s += sObjectInstanceFrozen(instanceStatus)
@@ -71,13 +72,29 @@ func sObjectInstanceAvail(objectAvail status.T, instance instance.Status, mon in
 			return iconStandbyUp
 		}
 		return iconStandbyUpIssue
+	default:
+		return instance.Avail.String()
 	}
-	return instance.Avail.String()
 }
 
 func sObjectInstanceOverall(instance instance.Status) string {
 	if instance.Overall == status.Warn {
 		return iconWarning
+	}
+	return ""
+}
+
+// sObjectInstanceRunning marks the instances having at least one resource run
+// in progress: a task or a sync. The daemon feeds instance.Status.Running from
+// the resource run files, one entry per running resource.
+func sObjectInstanceRunning(instance instance.Status) string {
+	if len(instance.Running) > 0 {
+		return iconRunning
+	}
+	for _, encap := range instance.Encap {
+		if len(encap.Running) > 0 {
+			return iconRunning
+		}
 	}
 	return ""
 }
@@ -132,6 +149,6 @@ func sObjectInstanceMonitorGlobalExpect(instanceMonitor instance.Monitor) string
 	case instance.MonitorGlobalExpectNone:
 		return ""
 	default:
-		return hiblue(" >" + instanceMonitor.GlobalExpect.String())
+		return hiBlue(" >" + instanceMonitor.GlobalExpect.String())
 	}
 }

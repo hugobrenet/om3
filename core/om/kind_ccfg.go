@@ -8,12 +8,12 @@ import (
 func init() {
 	kind := "ccfg"
 
-	cmdObject := newCmdCcfg()
+	cmdObject := commoncmd.NewCmdCcfg()
 	cmdObjectConfig := commoncmd.NewCmdObjectConfig(kind)
 	cmdObjectEdit := newCmdObjectEdit(kind)
 	cmdObjectSet := newCmdObjectSet(kind)
 	cmdObjectSSH := commoncmd.NewCmdObjectSSH(kind)
-	cmdObjectPrint := newCmdObjectPrint(kind)
+	cmdObjectPrint := commoncmd.NewCmdObjectPrint(kind)
 	cmdObjectPrintConfig := newCmdObjectPrintConfig(kind)
 	cmdObjectValidate := newCmdObjectValidate(kind)
 
@@ -21,7 +21,7 @@ func init() {
 		cmdObject,
 	)
 	cmdObject.AddGroup(
-		commoncmd.NewGroupOrchestratedActions(),
+		commoncmd.NewGroupOrchestrated(),
 		commoncmd.NewGroupQuery(),
 		commoncmd.NewGroupSubsystems(),
 	)
@@ -33,6 +33,7 @@ func init() {
 		cmdObjectPrint,
 		cmdObjectValidate,
 		newCmdClusterJoin(),
+		commoncmd.NewCmdClusterEnroll(),
 		newCmdClusterLeave(),
 		commoncmd.NewCmdClusterAbort(),
 		commoncmd.NewCmdClusterFreeze(),

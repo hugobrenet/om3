@@ -10,12 +10,13 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/opensvc/om3/v3/core/client"
-	"github.com/opensvc/om3/v3/core/cluster"
 	"github.com/opensvc/om3/v3/core/clusterdump"
 	"github.com/opensvc/om3/v3/core/object"
 	"github.com/opensvc/om3/v3/core/rawconfig"
 	"github.com/opensvc/om3/v3/daemon/daemon"
+	"github.com/opensvc/om3/v3/daemon/daemonauth"
 	"github.com/opensvc/om3/v3/daemon/daemonenv"
+	"github.com/opensvc/om3/v3/daemon/daemontesthelper"
 	"github.com/opensvc/om3/v3/testhelper"
 	"github.com/opensvc/om3/v3/util/hostname"
 )
@@ -39,6 +40,8 @@ func Setup(t *testing.T) (testhelper.Env, func()) {
 	env.InstallFile("./testdata/ca-cluster1.conf", "etc/namespaces/system/sec/ca.conf")
 	env.InstallFile("./testdata/cert-cluster1.conf", "etc/namespaces/system/sec/cert.conf")
 	env.InstallFile("./testdata/hb.conf", "etc/namespaces/system/sec/hb.conf")
+
+	daemontesthelper.SetFreeListenerPort(t)
 
 	// daemondata.Start needs initial cluster.ConfigData.Set
 	_, err := object.SetClusterConfig()
@@ -69,10 +72,12 @@ func GetClient(t *testing.T) (*client.T, error) {
 	t.Helper()
 	t.Logf("create client")
 	// need enough time when testing with race
+	tk, err := daemonauth.CreateNodeToken()
+	require.Nil(t, err)
 	cli, err := client.New(
 		client.WithURL(daemonenv.HTTPLocalURL()),
 		client.WithTimeout(3*time.Second),
-		client.WithPassword(cluster.ConfigData.Get().Secret()),
+		client.WithBearer(tk),
 	)
 	require.Nil(t, err)
 	return cli, err

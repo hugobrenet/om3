@@ -5,21 +5,20 @@ import "github.com/opensvc/om3/v3/core/commoncmd"
 func init() {
 	kind := "ccfg"
 
-	cmdObject := newCmdCcfg()
+	cmdObject := commoncmd.NewCmdCcfg()
 	cmdObjectConfig := commoncmd.NewCmdObjectConfig(kind)
 	cmdObjectEdit := newCmdObjectEdit(kind)
 	cmdObjectSet := newCmdObjectSet(kind)
-	cmdObjectPrint := newCmdObjectPrint(kind)
+	cmdObjectPrint := commoncmd.NewCmdObjectPrint(kind)
 	cmdObjectPrintConfig := newCmdObjectPrintConfig(kind)
 	cmdObjectSSH := commoncmd.NewCmdObjectSSH(kind)
 	cmdObjectValidate := newCmdObjectValidate(kind)
 
 	root.AddCommand(
 		cmdObject,
-		commoncmd.NewCmdMonitor(),
 	)
 	cmdObject.AddGroup(
-		commoncmd.NewGroupOrchestratedActions(),
+		commoncmd.NewGroupOrchestrated(),
 		commoncmd.NewGroupQuery(),
 		commoncmd.NewGroupSubsystems(),
 	)
@@ -31,6 +30,7 @@ func init() {
 		cmdObjectSSH,
 		cmdObjectValidate,
 		commoncmd.NewCmdClusterAbort(),
+		commoncmd.NewCmdClusterEnroll(),
 		commoncmd.NewCmdClusterFreeze(),
 		commoncmd.NewCmdClusterLogs(),
 		commoncmd.NewCmdClusterThaw(),

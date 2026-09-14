@@ -199,6 +199,13 @@ func (t *T) Info(ctx context.Context) (resource.InfoKeys, error) {
 	return m, nil
 }
 
+// StatusInfo implements resource.StatusInfoer
+func (t *T) StatusInfo(ctx context.Context) map[string]interface{} {
+	data := make(map[string]interface{})
+	data["mnt"] = t.mountPoint()
+	return data
+}
+
 func (t *T) testFile() string {
 	return filepath.Join(t.mountPoint(), ".opensvc")
 }
@@ -292,7 +299,7 @@ func (t *T) createDevice(ctx context.Context) error {
 func (t *T) createMountPoint(ctx context.Context) error {
 	if isRegular, err := file.ExistsAndRegular(t.Device); err != nil {
 		return err
-	} else if isRegular {
+	} else if isRegular && t.isBind() {
 		return t.createMountPointFile()
 	} else {
 		return t.createMountPointDir(t.MountPoint)
@@ -475,11 +482,15 @@ func (t *T) isBindMounted(ctx context.Context) (bool, error) {
 	}
 }
 
+func (t *T) isBind() bool {
+	return t.hasMountOption("bind") || t.Type == "bind"
+}
+
 func (t *T) isMounted(ctx context.Context) (bool, error) {
 	if t.hasMountOption("loop") {
 		return findmnt.HasFromMount(t.devpath(ctx), t.mountPoint())
 	}
-	if t.hasMountOption("bind") || t.Type == "bind" {
+	if t.isBind() {
 		return t.isBindMounted(ctx)
 	}
 	if t.fs().IsVirtual() {

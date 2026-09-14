@@ -68,6 +68,11 @@ type (
 
 		drainDuration time.Duration
 
+		// prKeyPeers are the peers last seen announcing the prkey of
+		// this node, so that the warning is written when the collision
+		// appears and not on every config change until it is fixed.
+		prKeyPeers []string
+
 		// nodeConfig is the published node.Config. It is refreshed when config is
 		// created or reloaded.
 		nodeConfig node.Config
@@ -670,6 +675,10 @@ func (t *Manager) updateStats() {
 	}
 	node.StatsData.Set(t.localhost, stats.DeepCopy())
 	t.publisher.Pub(&msgbus.NodeStatsUpdated{Node: t.localhost, Value: *stats.DeepCopy()}, t.labelLocalhost)
+	t.updateIsOverloadedAndPublish(stats)
+}
+
+func (t *Manager) updateIsOverloadedAndPublish(stats node.Stats) {
 	if changed := t.updateIsOverloaded(stats); changed {
 		t.publishNodeStatus()
 	}
@@ -746,6 +755,8 @@ func (t *Manager) onPeerNodeConfigUpdated(m *msgbus.NodeConfigUpdated) {
 	peerNodeInfo.Env = m.Value.Env
 	t.cacheNodesInfo[m.Node] = peerNodeInfo
 	t.saveNodesInfo()
+	t.checkPRKey()
+	t.refreshNodeIssues()
 }
 
 func (t *Manager) onPeerNodeOsPathsUpdated(m *msgbus.NodeOsPathsUpdated) {
@@ -819,6 +830,7 @@ func (t *Manager) loadConfig() error {
 	}
 	t.config = n.MergedConfig()
 	t.nodeConfig = t.getNodeConfig()
+	t.nodeConfig.Issues = t.nodeIssues(t.nodeConfig)
 	localNodeInfo := t.cacheNodesInfo[t.localhost]
 	localNodeInfo.Labels = t.nodeConfig.Labels
 	localNodeInfo.Env = t.nodeConfig.Env
@@ -838,7 +850,7 @@ func (t *Manager) loadConfigAndPublish() error {
 	}
 
 	if stats := node.StatsData.GetByNode(t.localhost); stats != nil && stats.MemTotalMB != 0 {
-		t.updateIsOverloaded(*stats)
+		t.updateIsOverloadedAndPublish(*stats)
 	}
 
 	var labelsChanged, pathsChanged bool
@@ -863,6 +875,10 @@ func (t *Manager) loadConfigAndPublish() error {
 	if !prevNodeConfig.Equal(t.nodeConfig) {
 		node.ConfigData.Set(t.localhost, t.nodeConfig.DeepCopy())
 		t.publisher.Pub(&msgbus.NodeConfigUpdated{Node: t.localhost, Value: t.nodeConfig}, t.labelLocalhost)
+		if prevNodeConfig.PRKey != t.nodeConfig.PRKey {
+			t.prKeyPeers = nil
+		}
+		t.checkPRKey()
 	}
 
 	if labelsChanged {

@@ -3,6 +3,8 @@ package daemontesthelper
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"os"
 	"testing"
 	"time"
@@ -15,6 +17,7 @@ import (
 	"github.com/opensvc/om3/v3/core/cluster"
 	"github.com/opensvc/om3/v3/core/hbsecobject"
 	"github.com/opensvc/om3/v3/core/instance"
+	"github.com/opensvc/om3/v3/core/keyop"
 	"github.com/opensvc/om3/v3/core/node"
 	"github.com/opensvc/om3/v3/core/object"
 	"github.com/opensvc/om3/v3/core/rawconfig"
@@ -22,6 +25,7 @@ import (
 	"github.com/opensvc/om3/v3/daemon/daemondata"
 	"github.com/opensvc/om3/v3/daemon/daemonenv"
 	"github.com/opensvc/om3/v3/daemon/hb/hbcrypto"
+	"github.com/opensvc/om3/v3/daemon/hb/hbdedup"
 	"github.com/opensvc/om3/v3/daemon/hbcache"
 	"github.com/opensvc/om3/v3/daemon/runner"
 	"github.com/opensvc/om3/v3/testhelper"
@@ -79,6 +83,7 @@ func Setup(t *testing.T, env *testhelper.Env) *D {
 	assert.NoError(t, err)
 	cryptoWorker := hbcrypto.T{}
 	ctx = hbcrypto.ContextWithCrypto(ctx, cryptoWorker.Start(ctx, initialCcfg.Name, *initialHeartbeatSecret))
+	ctx = hbdedup.ContextWithCache(ctx, hbdedup.NewCache(hbdedup.DefaultWindow))
 
 	qsSmall := pubsub.WithQueueSize(daemonenv.SubQSSmall)
 	testRunner := runner.NewDefault(qsSmall)
@@ -98,6 +103,32 @@ func Setup(t *testing.T, env *testhelper.Env) *D {
 		Cancel:        cancelD,
 		DrainDuration: drainDuration,
 	}
+}
+
+// SetFreeListenerPort points the listener.port cluster config keyword to a
+// free port, so a daemon started by a test doesn't try to bind the cluster
+// default one, which a real daemon may hold on the test node.
+//
+// Call it after the cluster config is installed, and before the daemon is
+// started: daemon.Start reads the port from the config and republishes it
+// to daemonenv.HTTPPort, where the clients find it.
+func SetFreeListenerPort(t *testing.T) {
+	t.Helper()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	port := listener.Addr().(*net.TCPAddr).Port
+	require.NoError(t, listener.Close())
+
+	o, err := object.NewCluster()
+	require.NoError(t, err)
+	require.NoError(t, o.Config().Set(keyop.ParseList(fmt.Sprintf("listener.port=%d", port))...))
+
+	// the tests of a binary share daemonenv.HTTPPort
+	previousPort := daemonenv.HTTPPort
+	t.Cleanup(func() { daemonenv.HTTPPort = previousPort })
+
+	t.Logf("listener port set to %d", port)
 }
 
 func initEnv(t *testing.T) *testhelper.Env {

@@ -3,7 +3,7 @@ package sgcp
 import (
 	"context"
 	"encoding/json"
-	"net"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -49,16 +49,7 @@ func TestDo(t *testing.T) {
 		}
 	})
 
-	ts := httptest.NewUnstartedServer(handler)
-
-	ln, err := net.Listen("tcp", "127.0.0.1:1215")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	ts.EnableHTTP2 = true
-	ts.Listener = ln
-	ts.StartTLS()
+	ts := httptest.NewTLSServer(handler)
 	defer ts.Close()
 
 	client := ts.Client()
@@ -73,11 +64,12 @@ func TestDo(t *testing.T) {
 	ctx := context.Background()
 
 	// First request should hit the server
-	code, data1, err := api.do(ctx, "GET", "https://127.0.0.1:1215/foo/bar", nil, "scope1", "scope2")
+	url := ts.URL + "/foo/bar"
+	code, data1, err := api.do(ctx, "GET", url, nil, "scope1", "scope2")
 	require.Equal(t, 200, code)
 	require.NoError(t, err)
 	t.Logf("First request result: %s", string(data1))
-	assert.Equal(t, string([]byte(`{"test":["test"]}`)), strings.TrimSuffix(string(data1), "\n"))
+	assert.Equal(t, `{"test":["test"]}`, strings.TrimSuffix(string(data1), "\n"))
 }
 
 // TestCheckStatusCode tests the status code checking
@@ -92,4 +84,43 @@ func TestCheckStatusCode(t *testing.T) {
 
 	err = a.CheckStatusCode(http.MethodGet, "https://localhost:1215/foo", 201, 200, 201)
 	assert.Nil(t, err)
+}
+
+// TestDoErrorStatusIsNotAnError verifies do hands back the status code and the
+// response body of a failed request without an error. The status is an answer:
+// the callers branch on a 404 or a 412, and an error here would shadow them,
+// as every caller tests the error first.
+func TestDoErrorStatusIsNotAnError(t *testing.T) {
+	defer Setup(t)()
+
+	for _, wanted := range []int{
+		http.StatusNotFound,
+		http.StatusPreconditionFailed,
+		http.StatusInternalServerError,
+	} {
+		t.Run(fmt.Sprint(wanted), func(t *testing.T) {
+			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(wanted)
+				_, _ = w.Write([]byte(`{"message":"nope"}`))
+			})
+			ts := httptest.NewTLSServer(handler)
+			defer ts.Close()
+
+			api := Api{
+				client: ts.Client(),
+				log:    plog.NewDefaultLogger(),
+				tk:     &TTkBuilder{},
+			}
+
+			code, data, err := api.do(context.Background(), "GET", ts.URL+"/foo/bar", nil, "scope1")
+			require.NoError(t, err)
+			assert.Equal(t, wanted, code)
+			assert.Equal(t, `{"message":"nope"}`, string(data), "the error body reached the caller")
+
+			// The caller is the one turning an unwanted status into an error.
+			assert.Error(t, api.CheckStatusCode("GET", ts.URL+"/foo/bar", code, http.StatusOK))
+			assert.NoError(t, api.CheckStatusCode("GET", ts.URL+"/foo/bar", code, http.StatusOK, wanted))
+		})
+	}
 }

@@ -8,7 +8,7 @@ import (
 
 func init() {
 	kind := ""
-	cmdObject := newCmdAll()
+	cmdObject := commoncmd.NewCmdAll()
 	cmdObjectCollector := commoncmd.NewCmdObjectCollector(kind)
 	cmdObjectCollectorTag := newCmdObjectCollectorTag(kind)
 	cmdObjectCompliance := commoncmd.NewCmdObjectCompliance(kind)
@@ -17,28 +17,22 @@ func init() {
 	cmdObjectComplianceShow := newCmdObjectComplianceShow(kind)
 	cmdObjectComplianceList := newCmdObjectComplianceList(kind)
 	cmdObjectConfig := commoncmd.NewCmdObjectConfig(kind)
-	cmdObjectContainer := commoncmd.NewCmdObjectContainer(kind)
 	cmdObjectEdit := newCmdObjectEdit(kind)
 	cmdObjectInstance := commoncmd.NewCmdObjectInstance(kind)
 	cmdObjectInstancePG := commoncmd.NewCmdObjectInstancePG(kind)
 	cmdObjectInstanceDevice := commoncmd.NewCmdObjectInstanceDevice(kind)
-	cmdObjectInstanceResource := commoncmd.NewCmdObjectInstanceResource(kind)
-	cmdObjectInstanceResourceInfo := commoncmd.NewCmdObjectInstanceResourceInfo(kind)
-	cmdObjectInstanceSync := commoncmd.NewCmdObjectInstanceSync(kind)
 	cmdObjectPG := commoncmd.NewCmdObjectInstancePG(kind)
 	cmdObjectPG.Hidden = true
-	cmdObjectPrint := newCmdObjectPrint(kind)
+	cmdObjectPrint := commoncmd.NewCmdObjectPrint(kind)
 	cmdObjectPrintConfig := newCmdObjectPrintConfig(kind)
-	cmdObjectPush := newCmdObjectPush(kind)
-	cmdObjectResource := commoncmd.NewCmdObjectResource(kind)
 	cmdObjectSet := newCmdObjectSet(kind)
 	cmdObjectSchedule := commoncmd.NewCmdObjectSchedule(kind)
-	cmdObjectSync := commoncmd.NewCmdObjectSync(kind)
 	cmdObjectValidate := newCmdObjectValidate(kind)
 
 	cmdObject.AddGroup(
-		commoncmd.NewGroupOrchestratedActions(),
+		commoncmd.NewGroupOrchestrated(),
 		commoncmd.NewGroupQuery(),
+		commoncmd.NewGroupResources(),
 		commoncmd.NewGroupSubsystems(),
 	)
 	root.AddCommand(
@@ -48,16 +42,29 @@ func init() {
 		cmdObjectCollector,
 		cmdObjectCompliance,
 		cmdObjectConfig,
-		cmdObjectContainer,
+		newCmdDataStoreAdd(kind),
+		newCmdDataStoreChange(kind),
+		newCmdDataStoreDecode(kind),
+		newCmdDataStoreKeys(kind),
+		newCmdDataStoreInstall(kind),
+		newCmdDataStoreRemove(kind),
+		newCmdObjectKey(kind),
+		newCmdObjectContainer(kind),
+		newCmdObjectIP(kind),
+		newCmdObjectFS(kind),
+		newCmdObjectVolume(kind),
+		newCmdObjectDisk(kind),
+		newCmdObjectShare(kind),
+		newCmdObjectApp(kind),
+		newCmdObjectTask(kind),
 		cmdObjectEdit,
 		cmdObjectInstance,
 		cmdObjectPG,
 		cmdObjectPrint,
-		cmdObjectPush,
-		cmdObjectResource,
+		newCmdObjectResource(kind),
 		cmdObjectSet,
 		cmdObjectSchedule,
-		cmdObjectSync,
+		newCmdObjectSync(kind),
 		cmdObjectValidate,
 		newCmdObjectAbort(kind),
 		commoncmd.NewCmdObjectClear(kind),
@@ -94,11 +101,10 @@ func init() {
 	)
 	cmdObjectInstance.AddCommand(
 		cmdObjectInstanceDevice,
-		cmdObjectInstanceSync,
-		cmdObjectInstanceResource,
 		newCmdObjectInstanceBoot(kind),
 		newCmdObjectInstanceDelete(kind),
 		newCmdObjectInstanceFreeze(kind),
+		newCmdObjectGroupInfo(kind, ""),
 		newCmdObjectInstanceList(kind),
 		newCmdObjectInstanceRun(kind),
 		newCmdObjectInstanceStatus(kind),
@@ -113,6 +119,13 @@ func init() {
 		newCmdObjectInstanceUnfreeze(kind),
 		newCmdObjectInstanceUnprovision(kind),
 		commoncmd.NewCmdObjectInstanceClear(kind, hostname.Hostname()),
+
+		// sync
+		newCmdObjectInstanceIngest(kind),
+		newCmdObjectInstanceFull(kind),
+		newCmdObjectInstanceResync(kind),
+		newCmdObjectInstanceSplit(kind),
+		newCmdObjectInstanceUpdate(kind),
 	)
 	cmdObjectInstanceDevice.AddCommand(
 		newCmdObjectInstanceDeviceList(kind),
@@ -120,25 +133,8 @@ func init() {
 	cmdObjectInstancePG.AddCommand(
 		newCmdObjectInstancePGUpdate(kind),
 	)
-	cmdObjectInstanceResource.AddCommand(
-		cmdObjectInstanceResourceInfo,
-	)
-	cmdObjectInstanceResourceInfo.AddCommand(
-		newCmdObjectInstanceResourceInfoList(kind),
-		newCmdObjectInstanceResourceInfoPush(kind),
-	)
-	cmdObjectInstanceSync.AddCommand(
-		newCmdObjectInstanceSyncIngest(kind),
-		newCmdObjectInstanceSyncFull(kind),
-		newCmdObjectInstanceSyncResync(kind),
-		newCmdObjectInstanceSyncSplit(kind),
-		newCmdObjectInstanceSyncUpdate(kind),
-	)
 	cmdObjectPG.AddCommand(
 		newCmdObjectInstancePGUpdate(kind),
-	)
-	cmdObjectResource.AddCommand(
-		newCmdObjectResourceList(kind),
 	)
 	cmdObjectConfig.AddCommand(
 		omcmd.NewCmdObjectConfigDoc(kind),
@@ -149,10 +145,6 @@ func init() {
 		newCmdObjectConfigShow(kind),
 		newCmdObjectConfigUpdate(kind),
 		newCmdObjectConfigValidate(kind),
-	)
-	cmdObjectContainer.AddCommand(
-		newCmdObjectContainerEnter(kind),
-		newCmdObjectContainerLogs(kind),
 	)
 	cmdObjectEdit.AddCommand(
 		newCmdObjectEditConfig(kind),
@@ -173,16 +165,6 @@ func init() {
 	)
 	cmdObjectPrintConfig.AddCommand(
 		newCmdObjectConfigMtime(kind),
-	)
-	cmdObjectPush.AddCommand(
-		newCmdObjectPushResourceInfo(kind),
-	)
-	cmdObjectSync.AddCommand(
-		newCmdObjectInstanceSyncFull(kind),
-		newCmdObjectInstanceSyncIngest(kind),
-		newCmdObjectInstanceSyncResync(kind),
-		newCmdObjectInstanceSyncSplit(kind),
-		newCmdObjectInstanceSyncUpdate(kind),
 	)
 	cmdObjectValidate.AddCommand(
 		newCmdObjectValidateConfig(kind),

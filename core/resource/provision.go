@@ -67,11 +67,18 @@ func getProvisionStatus(ctx context.Context, t Driver) ProvisionStatus {
 
 // Provision handles triggers around provision() and resource dependencies
 func Provision(ctx context.Context, r Driver, leader bool) error {
+	if err := removeStopped(r); err != nil {
+		return err
+	}
 	defer EvalStatus(ctx, r)
 	if r.IsDisabled() {
 		return nil
 	}
 	Setenv(r)
+	if r.IsActionDisabled() {
+		r.Log().Infof("skip provision (noaction tag), just set the provisioned state")
+		return setProvisionedValue(true, r)
+	}
 	if r.IsProvisionDisabled() {
 		if prov, err := Provisioned(ctx, r); err != nil {
 			return fmt.Errorf("provision is disabled, can't detect the provisioned state: %w", err)
@@ -110,6 +117,10 @@ func Unprovision(ctx context.Context, r Driver, leader bool) error {
 		return nil
 	}
 	Setenv(r)
+	if r.IsActionDisabled() {
+		r.Log().Infof("skip unprovision (noaction tag), just set the unprovisioned state")
+		return setProvisionedValue(false, r)
+	}
 	if r.IsUnprovisionDisabled() {
 		if prov, err := Provisioned(ctx, r); err != nil {
 			return fmt.Errorf("unprovision is disabled, can't detect the provisioned state: %w", err)

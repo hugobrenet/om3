@@ -4,6 +4,7 @@ import (
 	"embed"
 
 	"github.com/opensvc/om3/v3/core/keywords"
+	"github.com/opensvc/om3/v3/util/converters"
 )
 
 var (
@@ -27,9 +28,17 @@ var (
 			Text:     keywords.NewText(fs, "text/kw/hostname"),
 		},
 		{
+			Attr:      "DNSExtra",
+			Converter: converters.List,
+			Example:   "1.1.1.1 8.8.8.8",
+			Option:    "dns",
+			Scopable:  true,
+			Text:      keywords.NewText(fs, "text/kw/dns"),
+		},
+		{
 			Aliases:   []string{},
 			Attr:      "DNSSearch",
-			Converter: "list",
+			Converter: converters.List,
 			Example:   "opensvc.com",
 			Option:    "dns_search",
 			Required:  false,
@@ -63,7 +72,7 @@ var (
 		{
 			Aliases:   []string{"run_command"},
 			Attr:      "Command",
-			Converter: "shlex",
+			Converter: converters.Shlex,
 			Example:   "/opt/tomcat/bin/catalina.sh",
 			Option:    "command",
 			Scopable:  true,
@@ -71,7 +80,7 @@ var (
 		},
 		{
 			Attr:      "RunArgs",
-			Converter: "shlex",
+			Converter: converters.Shlex,
 			Example:   "-v /opt/docker.opensvc.com/vol1:/vol1:rw -p 37.59.71.25:8080:8080",
 			Option:    "run_args",
 			Scopable:  true,
@@ -79,7 +88,7 @@ var (
 		},
 		{
 			Attr:      "Entrypoint",
-			Converter: "shlex",
+			Converter: converters.Shlex,
 			Example:   "/bin/sh",
 			Option:    "entrypoint",
 			Scopable:  true,
@@ -89,20 +98,20 @@ var (
 			Option:    "rm",
 			Attr:      "Remove",
 			Scopable:  true,
-			Converter: "bool",
+			Converter: converters.Bool,
 			Example:   "false",
 			Text:      keywords.NewText(fs, "text/kw/rm"),
 		},
 		{
 			Attr:      "Privileged",
-			Converter: "bool",
+			Converter: converters.Bool,
 			Option:    "privileged",
 			Scopable:  true,
 			Text:      keywords.NewText(fs, "text/kw/privileged"),
 		},
 		{
 			Attr:      "Init",
-			Converter: "bool",
+			Converter: converters.Bool,
 			Default:   "true",
 			Option:    "init",
 			Scopable:  true,
@@ -110,21 +119,21 @@ var (
 		},
 		{
 			Attr:      "Interactive",
-			Converter: "bool",
+			Converter: converters.Bool,
 			Option:    "interactive",
 			Scopable:  true,
 			Text:      keywords.NewText(fs, "text/kw/interactive"),
 		},
 		{
 			Attr:      "TTY",
-			Converter: "bool",
+			Converter: converters.Bool,
 			Option:    "tty",
 			Scopable:  true,
 			Text:      keywords.NewText(fs, "text/kw/tty"),
 		},
 		{
 			Attr:      "VolumeMounts",
-			Converter: "shlex",
+			Converter: converters.Shlex,
 			Example:   "myvol1:/vol1 myvol2:/vol2:rw /localdir:/data:ro",
 			Option:    "volume_mounts",
 			Scopable:  true,
@@ -132,7 +141,7 @@ var (
 		},
 		{
 			Attr:      "Env",
-			Converter: "shlex",
+			Converter: converters.Shlex,
 			Example:   "KEY=cert1/server.key PASSWORD=db/password",
 			Option:    "environment",
 			Scopable:  true,
@@ -140,7 +149,7 @@ var (
 		},
 		{
 			Attr:      "ConfigsEnv",
-			Converter: "shlex",
+			Converter: converters.Shlex,
 			Example:   "CRT=cert1/server.crt PEM=cert1/server.pem",
 			Option:    "configs_environment",
 			Scopable:  true,
@@ -148,7 +157,7 @@ var (
 		},
 		{
 			Attr:      "Devices",
-			Converter: "shlex",
+			Converter: converters.Shlex,
 			Example:   "myvol1:/dev/xvda myvol2:/dev/xvdb",
 			Option:    "devices",
 			Scopable:  true,
@@ -200,7 +209,7 @@ var (
 		},
 		{
 			Attr:      "PullTimeout",
-			Converter: "duration",
+			Converter: converters.Duration,
 			Default:   "2m",
 			Example:   "2m",
 			Option:    "pull_timeout",
@@ -209,7 +218,7 @@ var (
 		},
 		{
 			Attr:      "SecretsEnv",
-			Converter: "shlex",
+			Converter: converters.Shlex,
 			Example:   "CRT=cert1/server.pem sec1/*",
 			Option:    "secrets_environment",
 			Scopable:  true,
@@ -217,7 +226,7 @@ var (
 		},
 		{
 			Attr:      "ConfigsEnv",
-			Converter: "shlex",
+			Converter: converters.Shlex,
 			Example:   "PORT=http/port webapp/app1* {name}/* {name}-debug/settings",
 			Option:    "configs_environment",
 			Scopable:  true,

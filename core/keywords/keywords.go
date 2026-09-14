@@ -15,6 +15,7 @@ import (
 	"github.com/opensvc/om3/v3/core/driver"
 	"github.com/opensvc/om3/v3/core/keyop"
 	"github.com/opensvc/om3/v3/core/naming"
+	"github.com/opensvc/om3/v3/util/converters"
 	"github.com/opensvc/om3/v3/util/key"
 )
 
@@ -31,8 +32,9 @@ type (
 		// Required means the keyword mean be set, and thus disregards the default value.
 		Required bool
 
-		// Converter is the name of a registered routine converting a string into the keyword expected type.
-		Converter string
+		// Converter is the routine converting the string value into the
+		// keyword expected type. A nil Converter means no conversion.
+		Converter converters.Converter
 
 		// Text is a text explaining the role of the keyword.
 		Text string
@@ -84,6 +86,9 @@ type (
 
 		// Minimal force the keyword to be included in the minimal configlet of the driver doc.
 		Minimal bool
+
+		// RedactSecret means the keyword value will be hidden on config show with the flag --redact-secrets.
+		RedactSecret bool
 	}
 
 	Store   []*Keyword
@@ -240,18 +245,28 @@ func (t Store) Lookup(k key.T, kind naming.Kind, sectionType string) *Keyword {
 	return nil
 }
 
-func (t Store) Doc(w io.Writer, kind naming.Kind, driver, kw string, depth int) error {
+// RBACDoc returns the sentence the documentation of a keyword shows about the
+// grant a user needs to set it through the api, or an empty string when any
+// user may set it.
+//
+// It is a callback rather than a call into the rbac policy because every
+// driver imports this package, and the policy reads the install grammar of
+// core/datarecv, which imports this package back. The caller of Doc, which
+// sits above both, passes keyoprbac.Doc.
+type RBACDoc func(section, option string) string
+
+func (t Store) Doc(w io.Writer, kind naming.Kind, driver, kw string, depth int, rbacDoc RBACDoc) error {
 	depth += 1
 	if kw != "" {
 		switch len(t) {
 		case 0:
 			return fmt.Errorf("keyword '%s' not found", kw)
 		case 1:
-			return t[0].Doc(w, depth)
+			return t[0].Doc(w, depth, docSection(driver, t[0]), rbacDoc)
 		default:
 			sort.Sort(t)
 			for _, kw := range t {
-				if err := kw.Doc(w, depth); err != nil {
+				if err := kw.Doc(w, depth, docSection(driver, kw), rbacDoc); err != nil {
 					return err
 				}
 			}
@@ -262,7 +277,7 @@ func (t Store) Doc(w io.Writer, kind naming.Kind, driver, kw string, depth int) 
 	if driver != "" {
 		index := ParseIndex(driver)
 		if i, ok := m[index]; ok {
-			return driverDoc(w, i, index, kind, depth)
+			return driverDoc(w, i, index, kind, depth, rbacDoc)
 		} else {
 			return fmt.Errorf("driver '%s' not found", driver)
 		}
@@ -270,7 +285,7 @@ func (t Store) Doc(w io.Writer, kind naming.Kind, driver, kw string, depth int) 
 	l := Indices(maps.Keys(m))
 	sort.Sort(l)
 	for _, index := range l {
-		err := driverDoc(w, m[index], index, kind, depth)
+		err := driverDoc(w, m[index], index, kind, depth, rbacDoc)
 		if err != nil {
 			return err
 		}
@@ -296,7 +311,7 @@ func (t Store) DriverKeywords(section, typ string, kind naming.Kind) ([]*Keyword
 	return nil, fmt.Errorf("driver not found")
 }
 
-func driverDoc(w io.Writer, m map[string]*Keyword, index Index, kind naming.Kind, depth int) error {
+func driverDoc(w io.Writer, m map[string]*Keyword, index Index, kind naming.Kind, depth int, rbacDoc RBACDoc) error {
 	section := index[0]
 	typ := index[1]
 	title := index.String()
@@ -365,7 +380,7 @@ func driverDoc(w io.Writer, m map[string]*Keyword, index Index, kind naming.Kind
 
 	for _, opt := range optL {
 		kw := m[opt]
-		kw.Doc(w, depth)
+		kw.Doc(w, depth, section, rbacDoc)
 		fmt.Fprintln(w, "")
 	}
 	return nil
@@ -443,13 +458,38 @@ func (t *Keyword) DefaultKey() key.T {
 	return k
 }
 
-func (t *Keyword) Doc(w io.Writer, depth int) error {
+// docSection returns the driver group a keyword is documented under, which the
+// rbac policy is written by. A keyword looked up by name alone is documented
+// with the group of the driver asked for, or with its own section when the
+// keyword is not a driver's.
+func docSection(driver string, kw *Keyword) string {
+	if driver != "" {
+		return ParseIndex(driver)[0]
+	}
+	return kw.Section
+}
+
+func (t *Keyword) Doc(w io.Writer, depth int, section string, rbacDoc RBACDoc) error {
 	fprintProp := func(a, b string) {
 		fmt.Fprintf(w, "\t%-12s %s\n", a+":", b)
 	}
 	fmt.Fprintf(w, "%s Keyword `%s`\n\n", strings.Repeat("#", depth+1), t.Option)
 	fprintProp("required", fmt.Sprint(t.Required))
 	fprintProp("scopable", fmt.Sprint(t.Scopable))
+	if t.Deprecated != "" {
+		// The same phrasing as the config validate alert.
+		s := "since " + t.Deprecated
+		if t.ReplacedBy != "" {
+			s += ", replaced by " + t.ReplacedBy
+		}
+		fprintProp("deprecated", s)
+	}
+	if len(t.Aliases) > 0 {
+		fprintProp("aliases", strings.Join(t.Aliases, ", "))
+	}
+	if t.RedactSecret {
+		fprintProp("secret", "true")
+	}
 	if len(t.Candidates) > 0 {
 		fprintProp("candidates", strings.Join(t.Candidates, ", "))
 	}
@@ -463,8 +503,13 @@ func (t *Keyword) Doc(w io.Writer, depth int) error {
 	if t.Default != "" {
 		fprintProp("default", t.Default)
 	}
-	if t.Converter != "" {
-		fprintProp("convert", t.Converter)
+	if t.Converter != nil {
+		fprintProp("convert", t.Converter.String())
+	}
+	if rbacDoc != nil {
+		if s := rbacDoc(section, t.Option); s != "" {
+			fprintProp("rbac", s)
+		}
 	}
 	fmt.Fprintln(w, "")
 
