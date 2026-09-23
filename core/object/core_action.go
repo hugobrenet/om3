@@ -22,7 +22,6 @@ import (
 	"github.com/opensvc/om3/v3/core/actionrollback"
 	"github.com/opensvc/om3/v3/core/client"
 	"github.com/opensvc/om3/v3/core/env"
-	"github.com/opensvc/om3/v3/core/freeze"
 	"github.com/opensvc/om3/v3/core/naming"
 	"github.com/opensvc/om3/v3/core/resource"
 	"github.com/opensvc/om3/v3/core/resourceselector"
@@ -77,7 +76,7 @@ func (t *actor) setenv(action string, leader bool) {
 	os.Setenv("OPENSVC_SVCNAME", t.path.Name)
 	os.Setenv("OPENSVC_NAMESPACE", t.path.Namespace)
 	os.Setenv("OPENSVC_ACTION", action)
-	os.Setenv("OPENSVC_SID", xsession.Sid().String())
+	os.Setenv("OPENSVC_SESSION_ID", xsession.SessionID().String())
 	if leader {
 		os.Setenv("OPENSVC_LEADER", "1")
 	} else {
@@ -202,7 +201,7 @@ func (t *actor) announceProgress(ctx context.Context, progress string) error {
 	p := t.Path()
 	resp, err := c.PostInstanceProgressWithResponse(ctx, p.Namespace, p.Kind, p.Name, api.PostInstanceProgress{
 		State:     progress,
-		SessionID: xsession.Sid().UUID(),
+		SessionID: xsession.SessionID().UUID(),
 		IsPartial: &isPartial,
 	})
 	switch {
@@ -370,6 +369,22 @@ func instanceStatusIcon(avail, overall status.T) string {
 	return fmt.Sprintf("%s%s", a, b)
 }
 
+// actionSelectedRIDs returns the rids of the resources an action with a
+// resource selection depends on: the selected resources, and the resources
+// they require for this action via their <action>_requires keyword. The
+// state of the latter gates the action, so it must be as fresh as the state
+// of the resources the action works on.
+func actionSelectedRIDs(resources resource.Drivers, action string) []string {
+	rids := make([]string, 0, len(resources))
+	for _, r := range resources {
+		rids = append(rids, r.RID())
+		for rid := range r.Requires(action).Requirements() {
+			rids = append(rids, rid)
+		}
+	}
+	return rids
+}
+
 func (t *actor) action(ctx context.Context, fn resourceset.DoFunc) error {
 	if t.IsDisabled() {
 		return ErrDisabled
@@ -389,8 +404,14 @@ func (t *actor) action(ctx context.Context, fn resourceset.DoFunc) error {
 		t.log.Tracef("action barrier: %s", barrier)
 	}
 
-	if len(resources) == 0 && !resourceSelector.IsZero() {
-		return fmt.Errorf("resource does not exist")
+	// A selector naming a resource the object does not have asked for something
+	// it cannot do. A selector filtering on a driver group or a pattern did
+	// not: an object with no resource of that group has nothing to do, which
+	// is not an error. So "om <obj> instance start --rid ip#12" is refused
+	// where "om <obj> sync resync", which filters on the sync group, is a
+	// no-op.
+	if missing := resourceSelector.MissingRIDs(); len(missing) > 0 {
+		return fmt.Errorf("resource does not exist: %s", strings.Join(missing, ", "))
 	}
 
 	for _, r := range resources {
@@ -410,13 +431,20 @@ func (t *actor) action(ctx context.Context, fn resourceset.DoFunc) error {
 		resourceSelector.SelectRIDs(encaperRIDsAddedForSelectedEncapResources)
 	}
 
+	if !resourceSelector.IsZero() {
+		// Tell the drivers which resources the action depends on, so the
+		// status evaluations it runs before and after can spare the
+		// provider api calls on the other ones.
+		ctx = actioncontext.WithSelectedRIDs(ctx, t.path, actionSelectedRIDs(resourceSelector.Resources(), action.Name))
+	}
+
 	logger := t.log.
 		Attr("argv", os.Args).
 		Attr("cwd", wd).
 		Attr("action", action.Name).
 		Attr("origin", env.Origin()).
 		Attr("crm", "true")
-	logger.Infof(">>> do %s %s (origin %s, sid %s)", action.Name, os.Args, env.Origin(), xsession.Sid())
+	logger.Infof(">>> do %s %s (origin %s, session_id %s)", action.Name, os.Args, env.Origin(), xsession.SessionID())
 	beginTime := time.Now()
 	ctx, stop := statusbus.WithContext(ctx, t.path)
 	defer stop()
@@ -444,36 +472,53 @@ func (t *actor) action(ctx context.Context, fn resourceset.DoFunc) error {
 	ctxWithTimeout, cancelCtxWithTimeout := t.withActionTimeout(ctx)
 	defer cancelCtxWithTimeout()
 
-	freeze := func() error {
-		if !action.Freeze {
+	// setStopped raises or lowers the flag saying the instance was stopped on
+	// purpose, which is what tells the daemon whether it may start the
+	// instance back on its own.
+	//
+	// A stop used to freeze the instance for that, which said more than it
+	// meant: the frozen flag is how an operator says the daemon may not act
+	// here, and an orchestration writing it left the operator unable to tell
+	// their own decision from a side effect.
+	setStopped := func() error {
+		var (
+			verb string
+			fn   func() error
+		)
+		switch {
+		case action.MarksStopped:
+			verb, fn = "stopped", t.SetStopped
+		case action.ClearsStopped:
+			verb, fn = "wanted up", t.UnsetStopped
+		default:
 			return nil
 		}
 		if !resourceSelector.IsZero() {
-			t.log.Tracef("skip freeze: resource selection")
+			t.log.Tracef("skip flagging the instance %s: resource selection", verb)
 			return nil
 		}
-		if !t.orchestrateWantsFreeze() {
-			t.log.Tracef("skip freeze: orchestrate value")
+		if !t.daemonMayStartOnItsOwn() {
+			t.log.Tracef("skip flagging the instance %s: orchestrate value", verb)
 			return nil
 		}
 		if env.HasDaemonMonitorOrigin() {
-			t.log.Tracef("skip freeze: action has daemon origin")
+			t.log.Tracef("skip flagging the instance %s: action has daemon origin", verb)
 			return nil
 		}
 		if v, err := t.Config().IsInEncapNodes(hostname.Hostname()); err != nil {
 			return err
 		} else if v {
-			t.log.Tracef("skip freeze: encap node don't need to freeze as they don't orchestrate ha start")
+			t.log.Tracef("skip flagging the instance %s: an encap node does not orchestrate ha start", verb)
 			return nil
 		}
-		if err := freeze.Freeze(t.path.FrozenFile()); err != nil {
+		if err := fn(); err != nil {
 			return err
 		}
-		t.log.Infof("instance frozen")
+		t.log.Infof("instance %s", verb)
 		return nil
 	}
 
-	if err := freeze(); err != nil {
+	if err := setStopped(); err != nil {
 		_, _ = t.statusEval(ctxWithTimeout)
 		t.announceFailure(ctxWithTimeout)
 		return err
@@ -509,10 +554,10 @@ func (t *actor) action(ctx context.Context, fn resourceset.DoFunc) error {
 
 		args := append([]string{encapContainer.GetOsvcRootPath(), t.path.String()}, "config", "mtime")
 		envs := []string{
-			xsession.Sid().Var(),
+			xsession.SessionID().Var(),
 			env.Origin().Var(),
 		}
-		if v := xsession.Oid().Var(); v != "" {
+		if v := xsession.OrchestrationID().Var(); v != "" {
 			envs = append(envs, v)
 		}
 		cmd, err := encapContainer.EncapCmd(ctx, args, envs, nil)
@@ -821,7 +866,10 @@ func (t *actor) postStartStopStatusEval(ctx context.Context) error {
 	return nil
 }
 
-func (t *actor) orchestrateWantsFreeze() bool {
+// daemonMayStartOnItsOwn says the daemon starts this object without being
+// asked to, which is what makes the stopped flag needed: without it, the next
+// ha decision would undo a stop the operator asked for.
+func (t *actor) daemonMayStartOnItsOwn() bool {
 	switch t.Orchestrate() {
 	case "ha", "start":
 		return true

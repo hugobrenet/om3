@@ -62,14 +62,24 @@ type (
 		Merge(StatusLogger)
 	}
 
+	// requirer is the part of a resource StatusCheckRequires needs.
+	requirer interface {
+		Requires(string) *resourcereqs.T
+		RID() string
+	}
+
+	// varDirer is the part of a resource the stopped flag file helpers need.
+	varDirer interface {
+		VarDir() string
+	}
+
 	// Driver exposes what can be done with a resource
 	Driver interface {
 		Provisioned(context.Context) (provisioned.T, error)
-		Provision(context.Context) error
-		Unprovision(context.Context) error
 
 		// common
 		ApplyPG(context.Context) error
+		ResetPG(context.Context) error
 		DriverID() driver.ID
 		GetObject() any
 		GetPG() *pg.Config
@@ -122,7 +132,6 @@ type (
 
 	// T is the resource type, embedded in each drivers type
 	T struct {
-		Driver
 		ResourceID              *resourceid.T
 		Subset                  string
 		Disable                 bool
@@ -519,6 +528,25 @@ func (t *T) ApplyPG(ctx context.Context) error {
 	return nil
 }
 
+// ResetPG lifts the capping of the process group of this resource, and of the
+// groups above it the object owns.
+//
+// It registers the group the way applying does, and lifts what is not lifted
+// yet: the walk reaches every resource, and each call finds only its own group
+// left to do.
+func (t *T) ResetPG(ctx context.Context) error {
+	pgConfig := t.GetPG()
+	if pgConfig == nil {
+		return nil
+	}
+	mgr := pg.FromContext(ctx)
+	if mgr == nil {
+		return nil
+	}
+	mgr.Register(pgConfig)
+	return mgr.ResetConfigs()
+}
+
 // SetObject holds the useful interface of the parent object of the resource.
 func (t *T) SetObject(o any) {
 	if od, ok := o.(ObjectDriver); !ok {
@@ -703,7 +731,20 @@ func Setenv(r Driver) {
 	}
 }
 
-func StatusCheckRequires(ctx context.Context, action string, r Driver) error {
+// IsSelected tells whether the resource r is among the resources the
+// running action recorded with actioncontext.WithSelectedRIDs, i.e. the ones
+// it works on or reads the state of. The known return value is false when no
+// selection is recorded for the object of r, so the caller can apply its
+// default policy.
+func IsSelected(ctx context.Context, r Driver) (selected, known bool) {
+	o, ok := r.GetObject().(interface{ Path() naming.Path })
+	if !ok {
+		return false, false
+	}
+	return actioncontext.IsResourceSelected(ctx, o.Path(), r.RID())
+}
+
+func StatusCheckRequires(ctx context.Context, action string, r requirer) error {
 	reqs := r.Requires(action)
 	sb := statusbus.FromContext(ctx)
 	for rid, reqStates := range reqs.Requirements() {
@@ -879,6 +920,18 @@ func PGUpdate(ctx context.Context, r Driver) error {
 		return ErrDisabled
 	}
 	if err := r.ApplyPG(ctx); err != nil {
+		return err
+	}
+	return nil
+}
+
+// PGReset lifts the capping of the process group of a resource.
+func PGReset(ctx context.Context, r Driver) error {
+	defer EvalStatus(ctx, r)
+	if r.IsDisabled() || r.IsActionDisabled() {
+		return ErrDisabled
+	}
+	if err := r.ResetPG(ctx); err != nil {
 		return err
 	}
 	return nil
@@ -1355,7 +1408,7 @@ func (t *T) SetLoggerForTest(l *plog.Logger) {
 func (t *T) RunningFromLock(intent string) (RunningInfoList, error) {
 	var l RunningInfoList
 	p := filepath.Join(t.VarDir(), intent)
-	lock := flock.New(p, xsession.Sid().String(), fcntllock.New)
+	lock := flock.New(p, xsession.SessionID().String(), fcntllock.New)
 	meta, err := lock.Probe()
 	if err != nil {
 		return l, nil
@@ -1379,7 +1432,7 @@ func (t *T) Lock(disable bool, timeout time.Duration, intent string) (func(), er
 		return func() {}, nil
 	}
 	p := filepath.Join(t.VarDir(), intent)
-	lock := flock.New(p, xsession.Sid().String(), fcntllock.New)
+	lock := flock.New(p, xsession.SessionID().String(), fcntllock.New)
 	err := lock.Lock(timeout, intent)
 	if err != nil {
 		return nil, err
@@ -1498,11 +1551,11 @@ func (t *RunningInfoList) LoadRunDir(rid string, runDir runfiles.Dir) error {
 	return errs
 }
 
-func stoppedFlag(r Driver) string {
+func stoppedFlag(r varDirer) string {
 	return filepath.Join(r.VarDir(), "stopped")
 }
 
-func IsStopped(r Driver) (bool, error) {
+func IsStopped(r varDirer) (bool, error) {
 	path := stoppedFlag(r)
 	_, err := os.Stat(path)
 	if err == nil {

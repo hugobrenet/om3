@@ -65,6 +65,12 @@ type (
 		// cancel is a cancel func for icfg, used to stop ifg if error occurs
 		cancel context.CancelFunc
 	}
+
+	// volPoolCharger is implemented by a volume, and says what it takes of pools
+	// other than the one that served it.
+	volPoolCharger interface {
+		PoolCharges() map[string]int64
+	}
 )
 
 var (
@@ -360,6 +366,14 @@ func (t *Manager) configFileCheck() error {
 		}
 		if szPtr := cf.GetSize(keySize); szPtr != nil {
 			cfg.Size = *szPtr
+		}
+		// What the volume takes of other pools is read from what it is made
+		// of, so it is answered by the object and not by a keyword. It is
+		// published with the configuration because that is where a claim
+		// reads what a namespace holds, and a claim is weighed before
+		// anything is provisioned.
+		if charger, ok := any(t.configure).(volPoolCharger); ok {
+			cfg.VolConfig.Charges = charger.PoolCharges()
 		}
 	}
 	if actor, ok := any(t.configure).(object.Actor); ok {

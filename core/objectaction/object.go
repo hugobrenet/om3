@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"reflect"
-	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -27,17 +26,13 @@ import (
 	"github.com/opensvc/om3/v3/core/object"
 	"github.com/opensvc/om3/v3/core/objectselector"
 	"github.com/opensvc/om3/v3/core/output"
-	"github.com/opensvc/om3/v3/core/placement"
-	"github.com/opensvc/om3/v3/core/provisioned"
 	"github.com/opensvc/om3/v3/core/rawconfig"
-	"github.com/opensvc/om3/v3/core/status"
 	"github.com/opensvc/om3/v3/core/topology"
 	"github.com/opensvc/om3/v3/core/xerrors"
 	"github.com/opensvc/om3/v3/daemon/api"
 	"github.com/opensvc/om3/v3/daemon/msgbus"
 	"github.com/opensvc/om3/v3/util/funcopt"
 	"github.com/opensvc/om3/v3/util/hostname"
-	"github.com/opensvc/om3/v3/util/plog"
 	"github.com/opensvc/om3/v3/util/pubsub"
 	"github.com/opensvc/om3/v3/util/render/tree"
 	"github.com/opensvc/om3/v3/util/xsession"
@@ -68,7 +63,7 @@ func New(opts ...funcopt.O) *T {
 	t := &T{}
 	_ = funcopt.Apply(t, opts...)
 	if t.NodeSelector != "" && t.DefaultOutput == "" {
-		t.DefaultOutput = "tab=OBJECT:path,NODE:nodename,SID:data.session_id"
+		t.DefaultOutput = "tab=OBJECT:path,NODE:nodename,SESSION_ID:data.session_id,EXEC_ID:data.exec_id"
 	}
 	return t
 }
@@ -238,6 +233,18 @@ func WithOutput(s string) funcopt.O {
 	})
 }
 
+// WithSort sets the order of the result table.
+//
+// An action reaching several objects or several nodes answers a row per run,
+// and they arrive in whatever order the nodes answered in.
+func WithSort(s string) funcopt.O {
+	return funcopt.F(func(i any) error {
+		t := i.(*T)
+		t.Sort = s
+		return nil
+	})
+}
+
 func WithDefaultOutput(s string) funcopt.O {
 	return funcopt.F(func(i any) error {
 		t := i.(*T)
@@ -376,7 +383,7 @@ func (t T) DoLocal() error {
 	}
 
 	if t.Digest && isatty.IsTerminal(os.Stdin.Fd()) && (zerolog.GlobalLevel() != zerolog.DebugLevel) {
-		fmt.Printf("sid=%s\n", xsession.Sid())
+		fmt.Printf("session_id=%s\n", xsession.SessionID())
 	}
 	var errs error
 	results := make([]actionrouter.Result, 0)
@@ -414,14 +421,15 @@ func (t T) DoLocal() error {
 			break
 		}
 	}
-	output.Renderer{
+	errs = errors.Join(errs, output.Renderer{
 		DefaultOutput: t.DefaultOutput,
 		Output:        t.Output,
+		Sort:          t.Sort,
 		Color:         t.Color,
 		Data:          results,
 		HumanRenderer: func() string { return rsHumanRender(results) },
 		Colorize:      rawconfig.Colorize,
-	}.Print()
+	}.Print())
 	return errs
 }
 
@@ -455,6 +463,20 @@ func doPostObjectAction(ctx context.Context, c *client.T, target instance.Monito
 		return handleStatusCode(resp.StatusCode(), resp.Body, resp.JSON400, resp.JSON401, resp.JSON403, resp.JSON404, resp.JSON408, resp.JSON409, resp.JSON500)
 	case instance.MonitorGlobalExpectPurged:
 		resp, err := c.PostObjectActionPurgeWithResponse(ctx, p.Namespace, p.Kind, p.Name)
+		if err != nil {
+			return nil, err
+		}
+		return handleStatusCode(resp.StatusCode(), resp.Body, resp.JSON400, resp.JSON401, resp.JSON403, resp.JSON404, resp.JSON408, resp.JSON409, resp.JSON500)
+	case instance.MonitorGlobalExpectResized:
+		// The size is the daemon's to write, and the configuration it wrote
+		// is the one it queues the orchestration for, so nothing here names
+		// a configuration for the orchestration to wait on.
+		params := api.PostObjectActionResizeParams{}
+		body := api.PostObjectActionResize{}
+		if options, ok := targetOptions.(api.PostObjectActionResize); ok {
+			body = options
+		}
+		resp, err := c.PostObjectActionResizeWithResponse(ctx, p.Namespace, p.Kind, p.Name, &params, body)
 		if err != nil {
 			return nil, err
 		}
@@ -565,7 +587,11 @@ func (t T) DoAsync() error {
 		var (
 			err error
 			b   []byte
-			idC = make(chan uuid.UUID)
+			// Buffered, because the waiter gives up when the wait deadline
+			// expires: an unbuffered send of the id, from a submission that
+			// took the whole of that deadline, would then block for ever and
+			// the command would never return.
+			idC = make(chan uuid.UUID, 1)
 		)
 		if t.Wait {
 			t.waitExpectation(ctx, c, idC, target, p, waitC, t.TargetOptions)
@@ -606,13 +632,14 @@ func (t T) DoAsync() error {
 		}
 		rs = append(rs, r)
 	}
-	output.Renderer{
+	errs = errors.Join(errs, output.Renderer{
 		DefaultOutput: "tab=OBJECT:path,ORCHESTRATION_ID:orchestration_id,STATUS:status",
 		Output:        t.Output,
+		Sort:          t.Sort,
 		Color:         t.Color,
 		Data:          rs,
 		Colorize:      rawconfig.Colorize,
-	}.Print()
+	}.Print())
 	if t.Wait && toWait > 0 {
 		for i := 0; i < toWait; i++ {
 			select {
@@ -671,7 +698,7 @@ func (t T) DoRemote() error {
 	resultQ := make(chan actionrouter.Result)
 	done := 0
 	todo := 0
-	requesterSid := xsession.Sid().UUID()
+	requesterSessionID := xsession.SessionID().UUID()
 
 	var (
 		cancel context.CancelFunc
@@ -730,7 +757,7 @@ func (t T) DoRemote() error {
 				return err
 			}
 			if t.Wait {
-				t.waitRequesterSessionEnd(ctx, c, requesterSid, n, p, waitC)
+				t.waitRequesterSessionEnd(ctx, c, requesterSessionID, n, p, waitC)
 			}
 			t.instanceDo(ctx, resultQ, n, p, func(ctx context.Context, n string, p naming.Path) (any, error) {
 				return t.RemoteFunc(ctx, p, n)
@@ -757,14 +784,15 @@ func (t T) DoRemote() error {
 			break
 		}
 	}
-	output.Renderer{
+	errs = errors.Join(errs, output.Renderer{
 		DefaultOutput: t.DefaultOutput,
 		Output:        t.Output,
+		Sort:          t.Sort,
 		Color:         t.Color,
 		Data:          results,
 		HumanRenderer: func() string { return rsHumanRender(results) },
 		Colorize:      rawconfig.Colorize,
-	}.Print()
+	}.Print())
 	if t.Wait && todo > 0 {
 		for i := 0; i < todo; i++ {
 			select {
@@ -847,140 +875,28 @@ func (t T) instanceDo(ctx context.Context, resultQ chan actionrouter.Result, nod
 	}(nodename, path)
 }
 
-// waitExpectation waits for a specific global expectation to be fulfilled for an object by monitoring relevant events.
-// It listens for updates tied to the provided path, orchestration ID, and global expectation to detect state changes.
-// The orchestration ID is received from the idC channel, and filters are applied to narrow the monitored events.
-// Reports an error to the errC channel if the expectation is not met or if issues occur during execution.
-// The provided targetOptions parameter can be used to specify additional data for expectation validation.
+// waitExpectation waits for the orchestration the action was answered with,
+// and says how it went.
+//
+// It asks the daemon for the orchestration rather than watching the event
+// stream for the event ending it. The orchestration outlives the request in
+// the daemon, which answers the moment it ends and goes on answering
+// afterwards, so a client that asks late, or that lost its connection and
+// asks again, is still told how its request went. An end event missed is
+// missed for good, which is what made this fail on a slow client.
+//
+// Any node answers for any orchestration, the instance monitors carrying its
+// id reaching every node, so the node the action was submitted to is the one
+// asked, whichever node a floating address took it to.
+//
+// The verdict is the orchestration's own. The states the object reached are
+// not read back and judged here any more: the daemon knows what its instances
+// ended on, and the assertions this used to make were a second description of
+// the same thing, which went stale twice when the first one changed.
 func (t T) waitExpectation(ctx context.Context, c *client.T, idC <-chan uuid.UUID, globalExpect instance.MonitorGlobalExpect, p naming.Path, errC chan<- error, targetOptions any) {
-	var (
-		filters = make([]string, 0)
-		msg     pubsub.Messager
-
-		err      error
-		evReader event.ReadCloser
-
-		// orchestrationID is the ID of the orchestration we are waiting for.
-		// waitExpectation starts before the orchestration ID exists, so
-		// it will be received from the idC channel.
-		orchestrationID uuid.UUID
-
-		// orchestrationGlobalExpectUpdatedAt is the global expect updated at value
-		// for the orchestration we are waiting for.
-		// It will be received from event InstanceMonitorUpdated matching the orchestrationID
-		// value.
-		// It will be used to failfast when out waiting orchestration has been replaced
-		// by a more recent MonitorGlobalExpectAborted.
-		orchestrationGlobalExpectUpdatedAt time.Time
-
-		// checkFunc is a placeholder for validation logic that varies
-		// based on the value of `globalExpect`.
-		// For example, when `globalExpect` is `GlobalExpectFrozen`,
-		// it verifies that the object's frozen status is set to `frozen`.
-		// This function is used after orchestration completes successfully to
-		// validate expectations.
-		checkFunc func() error
-	)
-
-	logger := naming.LogWithPath(plog.NewDefaultLogger(), p)
-	getEvents := c.NewGetEvents()
-
-	switch globalExpect {
-	case instance.MonitorGlobalExpectStarted:
-		checkFunc = func() error {
-			if err := assertAvail(p, status.Up, status.NotApplicable); err != nil {
-				return err
-			}
-			return assertFrozen(p, "unfrozen")
-		}
-	case instance.MonitorGlobalExpectStopped:
-		checkFunc = func() error {
-			if err := assertAvail(p, status.Down, status.StandbyDown, status.NotApplicable); err != nil {
-				return err
-			}
-			return assertFrozen(p, "frozen")
-		}
-	case instance.MonitorGlobalExpectFrozen:
-		checkFunc = func() error {
-			return assertFrozen(p, "frozen")
-		}
-	case instance.MonitorGlobalExpectUnfrozen:
-		checkFunc = func() error {
-			return assertFrozen(p, "unfrozen")
-		}
-	case instance.MonitorGlobalExpectPurged:
-		checkFunc = func() error {
-			return assertAbsent(p)
-		}
-	case instance.MonitorGlobalExpectAborted:
-
-	case instance.MonitorGlobalExpectDeleted:
-		checkFunc = func() error {
-			return assertAbsent(p)
-		}
-	case instance.MonitorGlobalExpectProvisioned:
-		checkFunc = func() error {
-			if err := assertProvisioned(p, provisioned.True, provisioned.NotApplicable); err != nil {
-				return err
-			}
-			if err := assertAvail(p, status.Up, status.NotApplicable); err != nil {
-				return err
-			}
-			return assertFrozen(p, "unfrozen")
-		}
-	case instance.MonitorGlobalExpectRestarted:
-		checkFunc = func() error {
-			return assertAvail(p, status.Up, status.NotApplicable)
-		}
-	case instance.MonitorGlobalExpectUnprovisioned:
-		checkFunc = func() error {
-			return assertProvisioned(p, provisioned.False, provisioned.NotApplicable)
-		}
-	case instance.MonitorGlobalExpectPlaced:
-		checkFunc = func() error {
-			return assertPlaced(p, status.Up, status.NotApplicable)
-		}
-	case instance.MonitorGlobalExpectPlacedAt:
-		// switch --to same-node will not reproduce InstanceStatusUpdated events
-		// we need --wait to replay events from cache
-		getEvents = getEvents.WithReplay()
-
-		filters = append(filters,
-			"InstanceStatusUpdated,path="+p.String(),
-			"InstanceStatusDeleted,path="+p.String(),
-		)
-
-		checkFunc = func() error {
-			if option, ok := targetOptions.(instance.MonitorGlobalExpectOptionsPlacedAt); !ok {
-				return fmt.Errorf("unexpected orchestration options: %#v", targetOptions)
-			} else {
-				return assertPlacedAt(p, option, status.Up, status.NotApplicable)
-			}
-		}
-	}
-
-	filters = append(filters,
-		"ObjectStatusUpdated,path="+p.String(),
-		"ObjectStatusDeleted,path="+p.String(),
-		"ObjectOrchestrationEnd,path="+p.String(),
-		"SetInstanceMonitorRefused,path="+p.String(),
-		"InstanceMonitorUpdated,path="+p.String(),
-	)
-
-	getEvents = getEvents.SetFilters(filters)
-
-	logger.Tracef("object %s: wait expectation %s filters %v", p, globalExpect, filters)
-	if t.WaitDuration > 0 {
-		getEvents = getEvents.SetDuration(t.WaitDuration)
-	}
-	evReader, err = getEvents.GetReader(ctx)
-	if err != nil {
-		return
-	}
-
 	go func() {
+		var err error
 		defer func() {
-			_ = evReader.Close()
 			if err != nil {
 				err = fmt.Errorf("wait expectation %s failed on object %s: %w", globalExpect, p, err)
 			}
@@ -990,71 +906,23 @@ func (t T) waitExpectation(ctx context.Context, c *client.T, idC <-chan uuid.UUI
 			}
 		}()
 
+		var orchestrationID uuid.UUID
 		select {
 		case <-ctx.Done():
+			return
 		case orchestrationID = <-idC:
 		}
-		for {
-			ev, readError := evReader.Read()
-			if readError != nil {
-				if errors.Is(readError, io.EOF) {
-					err = fmt.Errorf("no more events, wait %v failed: %w", p, err)
-				} else {
-					err = readError
-				}
-				return
-			}
-			msg, err = msgbus.EventToMessage(*ev)
-			if err != nil {
-				return
-			}
-			switch m := msg.(type) {
-			case *msgbus.InstanceMonitorUpdated:
-				if m.Value.OrchestrationID == orchestrationID && m.Value.GlobalExpectUpdatedAt.After(orchestrationGlobalExpectUpdatedAt) {
-					orchestrationGlobalExpectUpdatedAt = m.Value.GlobalExpectUpdatedAt
-				} else if m.Value.GlobalExpectUpdatedAt.After(orchestrationGlobalExpectUpdatedAt) {
-					if m.Value.GlobalExpect == instance.MonitorGlobalExpectAborted {
-						err = fmt.Errorf("orchestration aborted:%s replaced our waiting %s:%s", m.Value.OrchestrationID, globalExpect, orchestrationID)
-						logger.Tracef("object %s: %s", p, err)
-						return
-					}
-				}
-			case *msgbus.InstanceStatusUpdated:
-				instance.StatusData.Set(m.Path, m.Node, &m.Value)
-			case *msgbus.InstanceStatusDeleted:
-				instance.StatusData.Unset(m.Path, m.Node)
-			case *msgbus.SetInstanceMonitorRefused:
-				err = fmt.Errorf("object %s: can't wait expectation %s: got orchestration refused", p, globalExpect)
-				logger.Tracef("%s", err)
-				return
-			case *msgbus.ObjectStatusUpdated:
-				object.StatusData.Set(m.Path, &m.Value)
-			case *msgbus.ObjectOrchestrationEnd:
-				if orchestrationID.String() != m.ID {
-					logger.Tracef("object %s: skip unmatched orchestration end (id %s global expect %s) we are waiting for (id %s global expect %s)",
-						p, m.ID, m.GlobalExpect, orchestrationID, globalExpect)
-					continue
-				} else if m.Aborted {
-					err = fmt.Errorf("orchestration end aborted (id %s global expect %s)", m.ID, m.GlobalExpect)
-					logger.Tracef("object %s: %s", p, err)
-					return
-				} else {
-					logger.Tracef("object %s: orchestration end (id %s global expect %s)", p, m.ID, m.GlobalExpect)
-					if checkFunc != nil {
-						if err = checkFunc(); err != nil {
-							logger.Tracef("%s: %s", p, err)
-						}
-					}
-					return
-				}
-			case *msgbus.ObjectStatusDeleted:
-				object.StatusData.Unset(m.Path)
-			}
+		if orchestrationID == uuid.Nil {
+			// The action was refused, and the refusal is the answer. There
+			// is no orchestration to wait for.
+			return
 		}
+
+		err = actionrouter.WaitOrchestration(ctx, c, orchestrationID)
 	}()
 }
 
-func (t T) waitRequesterSessionEnd(ctx context.Context, c *client.T, requesterSid uuid.UUID, n string, p naming.Path, errC chan<- error) {
+func (t T) waitRequesterSessionEnd(ctx context.Context, c *client.T, requesterSessionID uuid.UUID, n string, p naming.Path, errC chan<- error) {
 	var (
 		filters []string
 		msg     pubsub.Messager
@@ -1064,8 +932,8 @@ func (t T) waitRequesterSessionEnd(ctx context.Context, c *client.T, requesterSi
 	)
 	filters = []string{
 		fmt.Sprintf("ObjectStatusDeleted,path=%s", p),
-		fmt.Sprintf("ExecFailed,path=%s,.session_id=\"%s\"", p, requesterSid),
-		fmt.Sprintf("ExecSuccess,path=%s,.session_id=\"%s\"", p, requesterSid),
+		fmt.Sprintf("ExecFailed,path=%s,.session_id=\"%s\"", p, requesterSessionID),
+		fmt.Sprintf("ExecSuccess,path=%s,.session_id=\"%s\"", p, requesterSessionID),
 	}
 	getEvents := c.NewGetEvents().SetFilters(filters).SetNodename(n)
 	if t.WaitDuration > 0 {
@@ -1122,85 +990,4 @@ func (t asyncResult) Unstructured() map[string]any {
 		"path":             t.Path,
 		"status":           t.Status,
 	}
-}
-
-func assertAbsent(p naming.Path) error {
-	if object.StatusData.GetByPath(p) == nil {
-		naming.LogWithPath(plog.NewDefaultLogger(), p).Tracef("object %s: is absent", p)
-		return nil
-	}
-	return fmt.Errorf("object is not absent")
-}
-
-func assertAvail(p naming.Path, avail ...status.T) error {
-	if found := object.StatusData.GetByPath(p); found != nil {
-		if found.Avail.Is(avail...) {
-			naming.LogWithPath(plog.NewDefaultLogger(), p).Tracef("object %s: status avail '%s' is one of %s", p, found.Avail, avail)
-			return nil
-		} else {
-			return fmt.Errorf("object status avail '%s' is not one of %s", found.Avail, avail)
-
-		}
-	}
-	return fmt.Errorf("can't find object status")
-}
-
-func assertPlaced(p naming.Path, avail ...status.T) error {
-	if found := object.StatusData.GetByPath(p); found != nil {
-		if found.Avail.Is(avail...) {
-			expected := []placement.State{placement.NotApplicable, placement.Optimal}
-			if slices.Contains([]placement.State{placement.NotApplicable, placement.Optimal}, found.PlacementState) {
-				naming.LogWithPath(plog.NewDefaultLogger(), p).Tracef("object %s: status placement '%s' is not one of %s", p, found.PlacementState, expected)
-
-				return nil
-			} else {
-				return fmt.Errorf("object status placement '%s' is not one of %s", found.PlacementState, expected)
-			}
-		} else {
-			return fmt.Errorf("object status avail '%s' is not one of %s", found.Avail, avail)
-		}
-	}
-	return fmt.Errorf("can't find object status")
-}
-
-func assertPlacedAt(p naming.Path, placedAT instance.MonitorGlobalExpectOptionsPlacedAt, avail ...status.T) error {
-	if err := assertAvail(p, avail...); err != nil {
-		return err
-	}
-	for _, nodename := range placedAT.Destination {
-		if found := instance.StatusData.GetByPathAndNode(p, nodename); found != nil {
-			if !found.Avail.Is(avail...) {
-				return fmt.Errorf("instance %s@%s status avail '%s' is not one of %s", p, nodename, found.Avail, avail)
-			} else {
-				naming.LogWithPath(plog.NewDefaultLogger(), p).Tracef("instance %s@%s: status avail '%s' is one of %s", p, nodename, found.Avail, avail)
-				continue
-			}
-		}
-		return fmt.Errorf("can't find instance status for node %s", nodename)
-	}
-	return nil
-}
-
-func assertFrozen(p naming.Path, frozen ...string) error {
-	if found := object.StatusData.GetByPath(p); found != nil {
-		if slices.Contains(frozen, found.Frozen) {
-			naming.LogWithPath(plog.NewDefaultLogger(), p).Tracef("object %s: status frozen '%s' is one of %s", p, found.Frozen, frozen)
-			return nil
-		} else {
-			return fmt.Errorf("object status frozen '%s' is not one of %s", found.Frozen, frozen)
-		}
-	}
-	return fmt.Errorf("can't find object status")
-}
-
-func assertProvisioned(p naming.Path, provisioned ...provisioned.T) error {
-	if found := object.StatusData.GetByPath(p); found != nil {
-		if found.Provisioned.IsOneOf(provisioned...) {
-			naming.LogWithPath(plog.NewDefaultLogger(), p).Tracef("object %s: status provisioned '%s' is one of %s", p, found.Provisioned, provisioned)
-			return nil
-		} else {
-			return fmt.Errorf("object status provisioned '%s' is not one of %s", found.Provisioned, provisioned)
-		}
-	}
-	return fmt.Errorf("can't find object status")
 }

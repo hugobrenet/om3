@@ -94,12 +94,14 @@ func init() {
 		newCmdObjectConfigGet(kind),
 		newCmdObjectConfigShow(kind),
 		newCmdObjectConfigUpdate(kind),
+		newCmdObjectConfigMigrate(kind),
 		newCmdObjectConfigValidate(kind),
 	)
 	cmdObjectEdit.AddCommand(
 		newCmdObjectEditConfig(kind),
 	)
 	cmdObjectPG.AddCommand(
+		newCmdObjectInstancePGReset(kind),
 		newCmdObjectInstancePGUpdate(kind),
 	)
 	cmdObjectInstance.AddCommand(
@@ -135,6 +137,7 @@ func init() {
 		newCmdObjectInstanceDeviceList(kind),
 	)
 	cmdObjectInstancePG.AddCommand(
+		newCmdObjectInstancePGReset(kind),
 		newCmdObjectInstancePGUpdate(kind),
 	)
 	cmdObjectSchedule.AddCommand(

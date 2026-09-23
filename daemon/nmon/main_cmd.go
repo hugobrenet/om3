@@ -254,9 +254,32 @@ func (t *Manager) onSetNodeMonitor(c *msgbus.SetNodeMonitor) {
 		v.Close()
 	}
 
+	if err != nil {
+		// Refused, and the id the requester was handed names the refusal:
+		// this used to be said for a global expect only, so a local expect
+		// request refused, which is what an abort with nothing to abort is,
+		// left the id naming nothing and a client waiting on it waiting for
+		// the whole of its patience.
+		t.publishOrchestrationRefused(c.Value.CandidateOrchestrationID, c.Value.GlobalExpect, err.Error())
+	}
+
 	if t.change {
+		// The id the requester was handed names this orchestration from here
+		// on: on the node monitor the daemons replicate, on the execs this
+		// forks, and in the logs.
+		t.adoptOrchestration(c.Value.CandidateOrchestrationID)
 		t.updateIfChange()
 		t.orchestrate()
+	} else if err == nil {
+		// The request was accepted and changes nothing: the node is already
+		// where it asks it to be, which is the usual answer to an abort with
+		// nothing to abort. Saying so is what makes the id the requester was
+		// handed name something. Left unsaid, the id names an orchestration
+		// nobody ever hears of, and a client waiting on it waits for the
+		// whole of its patience. This is what the object monitor answers in
+		// the same case.
+		t.publishOrchestrationRefused(c.Value.CandidateOrchestrationID, c.Value.GlobalExpect,
+			fmt.Sprintf("set node monitor request => no changes: %v", c.Value))
 	}
 }
 

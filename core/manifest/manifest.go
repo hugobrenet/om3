@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"context"
+	"sort"
 	"sync"
 
 	"github.com/opensvc/om3/v3/core/driver"
@@ -61,12 +62,6 @@ type (
 )
 
 type (
-	provisioner interface {
-		Provision(context.Context) error
-	}
-	unprovisioner interface {
-		Unprovision(context.Context) error
-	}
 	starter interface {
 		Start(context.Context) error
 	}
@@ -105,12 +100,6 @@ func (t *T) AddInterfacesKeywords(r any) *T {
 	if _, ok := r.(stopper); ok {
 		t.AddKeywords(stopperKeywords...)
 	}
-	if _, ok := r.(provisioner); ok {
-		t.AddKeywords(provisionerKeywords...)
-	}
-	if _, ok := r.(unprovisioner); ok {
-		t.AddKeywords(unprovisionerKeywords...)
-	}
 	if _, ok := r.(syncer); ok {
 		t.AddKeywords(syncerKeywords...)
 	}
@@ -130,6 +119,11 @@ func New(did driver.ID, r any) *T {
 		Kinds:    make(naming.Kinds),
 	}
 	t.AddKeywords(genericKeywords...)
+	// Every resource goes through the provision and unprovision actions,
+	// which honor their triggers and requirements, whether or not the
+	// driver implements a Provision or Unprovision method.
+	t.AddKeywords(provisionerKeywords...)
+	t.AddKeywords(unprovisionerKeywords...)
 	t.AddInterfacesKeywords(r)
 	return t
 }
@@ -149,6 +143,12 @@ func (t *T) AddKeywords(attrs ...*keywords.Keyword) *T {
 	return t
 }
 
+// Keywords returns the keywords of the manifest, in a stable order.
+//
+// The attributes are held in a map, and what is generated from this list is
+// compared from one agent version to the next: the keyword documentation of a
+// release is diffed against the previous one, which a listing that comes out
+// in a different order every run makes impossible.
 func (t *T) Keywords() []*keywords.Keyword {
 	n := 0
 	for _, attr := range t.Attrs {
@@ -164,6 +164,12 @@ func (t *T) Keywords() []*keywords.Keyword {
 			n++
 		}
 	}
+	sort.Slice(l, func(i, j int) bool {
+		if l[i].Section != l[j].Section {
+			return l[i].Section < l[j].Section
+		}
+		return l[i].Option < l[j].Option
+	})
 	return l
 }
 

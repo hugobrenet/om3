@@ -183,6 +183,21 @@ func (e DriverListKind) Valid() bool {
 	}
 }
 
+// Defines values for ExecListKind.
+const (
+	ExecListKindExecList ExecListKind = "ExecList"
+)
+
+// Valid indicates whether the value is a known member of the ExecListKind enum.
+func (e ExecListKind) Valid() bool {
+	switch e {
+	case ExecListKindExecList:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GroupItemKind.
 const (
 	GroupItemKindGroupItem GroupItemKind = "GroupItem"
@@ -468,6 +483,21 @@ func (e Orchestrate) Valid() bool {
 	}
 }
 
+// Defines values for OrchestrationListKind.
+const (
+	OrchestrationListKindOrchestrationList OrchestrationListKind = "OrchestrationList"
+)
+
+// Valid indicates whether the value is a known member of the OrchestrationListKind enum.
+func (e OrchestrationListKind) Valid() bool {
+	switch e {
+	case OrchestrationListKindOrchestrationList:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PackageItemKind.
 const (
 	PackageItemKindPackageItem PackageItemKind = "PackageItem"
@@ -603,21 +633,6 @@ const (
 func (e PoolVolumeListKind) Valid() bool {
 	switch e {
 	case PoolVolumeListKindPoolVolumeList:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for ProcessListKind.
-const (
-	ProcessListKindProcessList ProcessListKind = "ProcessList"
-)
-
-// Valid indicates whether the value is a known member of the ProcessListKind enum.
-func (e ProcessListKind) Valid() bool {
-	switch e {
-	case ProcessListKindProcessList:
 		return true
 	default:
 		return false
@@ -1065,6 +1080,22 @@ type ClusterEnrollBody struct {
 	Token string `json:"token"`
 }
 
+// ClusterEvictBody defines model for ClusterEvictBody.
+type ClusterEvictBody struct {
+	// Credential The <username>:<password> of a user to create on the evicted node,
+	// once it is alone in its own cluster. Both halves must be set. The
+	// user is created in the 'system' namespace with the 'root' grant.
+	// Without this parameter, no user is created.
+	Credential *string `json:"credential,omitempty"`
+
+	// Nodename The name of the cluster node to remove from the cluster nodes. It
+	// must be drained, and it can not be the api node.
+	Nodename string `json:"nodename"`
+
+	// Timeout The maximum duration of the leave the evicted node forks.
+	Timeout *string `json:"timeout,omitempty"`
+}
+
 // ClusterStatus defines model for ClusterStatus.
 type ClusterStatus = map[string]interface{}
 
@@ -1129,6 +1160,18 @@ type DaemonJoinBody struct {
 	// cluster node. Its 'ca' claim is used to trust the target node
 	// certificate.
 	Token string `json:"token"`
+}
+
+// DaemonLeaveBody defines model for DaemonLeaveBody.
+type DaemonLeaveBody struct {
+	// Credential The <username>:<password> of a user to create once the daemon has
+	// restarted alone. Both halves must be set. The user is created in
+	// the 'system' namespace with the 'root' grant. Without this
+	// parameter, no user is created.
+	Credential *string `json:"credential,omitempty"`
+
+	// Timeout the maximum duration of the forked leave
+	Timeout *string `json:"timeout,omitempty"`
 }
 
 // DaemonListener defines model for DaemonListener.
@@ -1260,6 +1303,52 @@ type DriverListKind string
 // EventList responseEventList is a list of sse
 type EventList = openapi_types.File
 
+// ExecItem defines model for ExecItem.
+type ExecItem struct {
+	Command string     `json:"command"`
+	EndedAt *time.Time `json:"ended_at,omitempty"`
+	Error   *string    `json:"error,omitempty"`
+
+	// ExecID The exec this reports, which is what has one object, one outcome, one duration and one exit code.
+	ExecID string `json:"exec_id"`
+
+	// ExitCode What the process exited with, 128 + the signal number when a signal ended it, as the shell reports it. Absent while it runs. -1 when the process never ran at all.
+	ExitCode *int   `json:"exit_code,omitempty"`
+	Node     string `json:"node"`
+
+	// OrchestrationID The orchestration this exec is a step of, when it is one.
+	OrchestrationID *string `json:"orchestration_id,omitempty"`
+
+	// Origin What submitted the action. Example, api, imon, nmon, scheduler.
+	Origin string `json:"origin"`
+
+	// Path The object the exec acts on. Absent for a node action.
+	Path *string `json:"path,omitempty"`
+
+	// Pid The pid of the process running this exec. Absent once it has ended, and absent on a running exec whose process the daemon has lost track of.
+	Pid *int `json:"pid,omitempty"`
+
+	// RID The resource the exec is of, when it is of one. Set by the scheduler.
+	RID *string `json:"rid,omitempty"`
+
+	// SessionID The session id the submitter was handed. Several execs share it when one command reaches several objects of a node.
+	SessionID string    `json:"session_id"`
+	StartedAt time.Time `json:"started_at"`
+
+	// State One of running, succeeded, failed.
+	State string  `json:"state"`
+	Title *string `json:"title,omitempty"`
+}
+
+// ExecList defines model for ExecList.
+type ExecList struct {
+	Items []ExecItem   `json:"items"`
+	Kind  ExecListKind `json:"kind"`
+}
+
+// ExecListKind defines model for ExecList.Kind.
+type ExecListKind string
+
 // FlexConfig defines model for FlexConfig.
 type FlexConfig struct {
 	Max    int `json:"max"`
@@ -1372,6 +1461,8 @@ type Instance struct {
 
 // InstanceActionAccepted defines model for InstanceActionAccepted.
 type InstanceActionAccepted struct {
+	// ExecID The exec this node forked, naming this run alone, where the session is shared by every object and node the command reached.
+	ExecID    openapi_types.UUID `json:"exec_id"`
 	SessionID openapi_types.UUID `json:"session_id"`
 }
 
@@ -1417,7 +1508,10 @@ type InstanceStatus = instance.Status
 
 // KeywordDefinitionItem defines model for KeywordDefinitionItem.
 type KeywordDefinitionItem struct {
-	Aliases       []string `json:"aliases"`
+	Aliases []string `json:"aliases"`
+
+	// Arithmetic True when an expression written $(...) in the keyword value is computed. Implied by a converter that makes a number, and declared where the keyword holds a number but converts to none.
+	Arithmetic    bool     `json:"arithmetic"`
 	Candidates    []string `json:"candidates"`
 	Converter     string   `json:"converter"`
 	Default       string   `json:"default"`
@@ -1432,16 +1526,22 @@ type KeywordDefinitionItem struct {
 	Option        string   `json:"option"`
 	Provisioning  bool     `json:"provisioning"`
 
+	// Recorded True when the value names a thing that now exists, and was written into the configuration when that thing was made: the id an object was created with, the uuid an md array was created with. A configuration copied to make another thing must not carry it, so these are reset when an object is cloned.
+	Recorded bool `json:"recorded"`
+
 	// RedactSecret True when the keyword value is a secret, hidden by the config show --redact-secrets flag.
 	RedactSecret bool `json:"redactSecret"`
 
 	// ReplacedBy The name of the keyword to use instead of this deprecated one.
-	ReplacedBy string   `json:"replacedBy"`
-	Required   bool     `json:"required"`
-	Scopable   bool     `json:"scopable"`
-	Section    string   `json:"section"`
-	Text       string   `json:"text"`
-	Types      []string `json:"types"`
+	ReplacedBy string `json:"replacedBy"`
+	Required   bool   `json:"required"`
+	Scopable   bool   `json:"scopable"`
+	Section    string `json:"section"`
+
+	// Since The release the keyword appeared in, empty when it predates the field. What a release has is what its own documentation lists; this answers "since when" for the keywords added from here on.
+	Since string   `json:"since"`
+	Text  string   `json:"text"`
+	Types []string `json:"types"`
 }
 
 // KeywordDefinitionItems defines model for KeywordDefinitionItems.
@@ -1505,6 +1605,19 @@ type Network struct {
 	Used    big.Int   `json:"used"`
 }
 
+// NetworkClaim defines model for NetworkClaim.
+type NetworkClaim struct {
+	// ExpiresAt when a granted claim stops being counted, should the address it
+	// was granted for never be reserved
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+
+	// Granted whether the namespace may take one more address
+	Granted bool `json:"granted"`
+
+	// Reason why the namespace may not take it
+	Reason *string `json:"reason,omitempty"`
+}
+
 // NetworkIP defines model for NetworkIP.
 type NetworkIP struct {
 	IP      string           `json:"ip"`
@@ -1554,6 +1667,8 @@ type Node struct {
 
 // NodeActionAccepted defines model for NodeActionAccepted.
 type NodeActionAccepted struct {
+	// ExecID The exec this node forked, naming this run alone, where the session is shared by every node the command reached.
+	ExecID    openapi_types.UUID `json:"exec_id"`
 	SessionID openapi_types.UUID `json:"session_id"`
 }
 
@@ -1841,6 +1956,35 @@ type ObjectVolConfig struct {
 // Orchestrate defines model for Orchestrate.
 type Orchestrate string
 
+// OrchestrationItem defines model for OrchestrationItem.
+type OrchestrationItem struct {
+	EndedAt *time.Time `json:"ended_at,omitempty"`
+	Error   *string    `json:"error,omitempty"`
+
+	// Expect The state the orchestration is for. An object is asked by a global expect; a node by a global one to freeze and a local one to drain.
+	Expect *string `json:"expect,omitempty"`
+	Node   string  `json:"node"`
+
+	// OrchestrationID The orchestration id the submitter of the action was handed.
+	OrchestrationID string `json:"orchestration_id"`
+
+	// Path The object the orchestration is of. Absent when it is of the node.
+	Path      *string   `json:"path,omitempty"`
+	StartedAt time.Time `json:"started_at"`
+
+	// State One of running, succeeded, aborted, refused.
+	State string `json:"state"`
+}
+
+// OrchestrationList defines model for OrchestrationList.
+type OrchestrationList struct {
+	Items []OrchestrationItem   `json:"items"`
+	Kind  OrchestrationListKind `json:"kind"`
+}
+
+// OrchestrationListKind defines model for OrchestrationList.Kind.
+type OrchestrationListKind string
+
 // OrchestrationQueued defines model for OrchestrationQueued.
 type OrchestrationQueued struct {
 	OrchestrationID openapi_types.UUID `json:"orchestration_id"`
@@ -1903,16 +2047,50 @@ type PlacementState string
 type Pool struct {
 	Capabilities []string  `json:"capabilities"`
 	Errors       *[]string `json:"errors,omitempty"`
-	Free         int64     `json:"free"`
-	Head         string    `json:"head"`
-	Name         string    `json:"name"`
-	Node         string    `json:"node"`
-	Shared       bool      `json:"shared"`
-	Size         int64     `json:"size"`
-	Type         string    `json:"type"`
-	UpdatedAt    time.Time `json:"updated_at"`
-	Used         int64     `json:"used"`
-	VolumeCount  int       `json:"volume_count"`
+
+	// Free the bytes of storage behind the pool nothing has taken
+	Free int64  `json:"free"`
+	Head string `json:"head"`
+
+	// LogicalFree the bytes the pool can still hand out to volumes, which is the
+	// currency a volume is asked for in and a claim is rationed in
+	LogicalFree int64 `json:"logical_free"`
+
+	// LogicalSize the bytes the pool can hand out to volumes, counting a volume once
+	// however many nodes hold a copy of it
+	LogicalSize int64 `json:"logical_size"`
+
+	// LogicalUsed the bytes the pool has handed out to volumes
+	LogicalUsed int64  `json:"logical_used"`
+	Name        string `json:"name"`
+	Node        string `json:"node"`
+
+	// Shared whether every node sees the same storage, as the nodes of an array
+	// pool do, so that what the cluster holds of it is what one node
+	// reports and not the sum of what they all report
+	Shared bool `json:"shared"`
+
+	// Size the bytes of storage behind the pool
+	Size      int64     `json:"size"`
+	Type      string    `json:"type"`
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// Used the bytes of storage behind the pool something has taken
+	Used        int64 `json:"used"`
+	VolumeCount int   `json:"volume_count"`
+}
+
+// PoolClaim defines model for PoolClaim.
+type PoolClaim struct {
+	// ExpiresAt when a granted claim stops being counted, should the
+	// configuration it was granted for never be written
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+
+	// Granted whether the namespace may take what it asked for
+	Granted bool `json:"granted"`
+
+	// Reason why the namespace may not take it
+	Reason *string `json:"reason,omitempty"`
 }
 
 // PoolItems defines model for PoolItems.
@@ -1929,11 +2107,17 @@ type PoolListKind string
 
 // PoolVolume defines model for PoolVolume.
 type PoolVolume struct {
-	Children []string `json:"children"`
-	IsOrphan bool     `json:"is_orphan"`
-	Path     string   `json:"path"`
-	Pool     string   `json:"pool"`
-	Size     int64    `json:"size"`
+	// Charges what the volume takes of pools other than the one that served it,
+	// by pool name, which a volume made of storage carved elsewhere does
+	// and nothing else says
+	Charges  *map[string]int64 `json:"charges,omitempty"`
+	Children []string          `json:"children"`
+	IsOrphan bool              `json:"is_orphan"`
+	Path     string            `json:"path"`
+	Pool     string            `json:"pool"`
+
+	// Size the size the volume was served with by its pool
+	Size int64 `json:"size"`
 }
 
 // PoolVolumeItems defines model for PoolVolumeItems.
@@ -1955,10 +2139,33 @@ type PostInstanceProgress struct {
 	State     string             `json:"state"`
 }
 
+// PostNetworkClaim defines model for PostNetworkClaim.
+type PostNetworkClaim struct {
+	// Namespace the namespace holding addresses of the network
+	Namespace string `json:"namespace"`
+
+	// Network the name of the network the address is drawn from
+	Network string `json:"network"`
+
+	// Path the object the address is reserved for
+	Path string `json:"path"`
+
+	// RID the resource of the object the address is reserved for, so that a
+	// claim answered yes stops being counted on its own once the cluster
+	// reports the address it was granted for
+	RID string `json:"rid"`
+}
+
 // PostNodeDRBDConfigRequest defines model for PostNodeDRBDConfigRequest.
 type PostNodeDRBDConfigRequest struct {
 	AllocationID openapi_types.UUID `json:"allocation_id"`
 	Data         []byte             `json:"data"`
+}
+
+// PostObjectActionResize defines model for PostObjectActionResize.
+type PostObjectActionResize struct {
+	// Size The size the object is to hold, as "11g", "11GB" or "12Gi", or the amount to add, as "+1g". The size is written to the object configuration, which is what every node converges to, before the orchestration is queued. Omit it to converge to the size already configured, which is how a resize that stopped part way is finished.
+	Size *string `json:"size,omitempty"`
 }
 
 // PostObjectActionRestart defines model for PostObjectActionRestart.
@@ -1970,6 +2177,28 @@ type PostObjectActionRestart struct {
 type PostObjectActionSwitch struct {
 	Destination []string `json:"destination"`
 	Live        bool     `json:"live"`
+}
+
+// PostPoolClaim defines model for PostPoolClaim.
+type PostPoolClaim struct {
+	// Namespace the namespace taking of the pool
+	Namespace string `json:"namespace"`
+
+	// Path the object the claim is for, so that a claim answered yes stops
+	// being counted on its own once the configuration of the object
+	// says the same thing
+	Path *string `json:"path,omitempty"`
+
+	// Pool the name of the pool the namespace takes of
+	Pool string `json:"pool"`
+
+	// Probe answer whether the namespace may take it, without counting it as
+	// taken: what a pool lookup asks of every pool it weighs, where only
+	// the pool it picks is claimed of
+	Probe *bool `json:"probe,omitempty"`
+
+	// Size the size the object is to hold, not the increase
+	Size int64 `json:"size"`
 }
 
 // PostRelayMessage defines model for PostRelayMessage.
@@ -1999,32 +2228,6 @@ type Problem struct {
 	// negotiation; see [RFC7231], Section 3.4).
 	Title string `json:"title"`
 }
-
-// ProcessItem defines model for ProcessItem.
-type ProcessItem struct {
-	Cmd          string    `json:"cmd"`
-	Elapsed      string    `json:"elapsed"`
-	GlobalExpect string    `json:"global_expect"`
-	Node         string    `json:"node"`
-	Object       string    `json:"object"`
-	Pid          int       `json:"pid"`
-	Rid          string    `json:"rid"`
-	Sid          string    `json:"sid"`
-	StartedAt    time.Time `json:"started_at"`
-	Sub          string    `json:"sub"`
-}
-
-// ProcessItems defines model for ProcessItems.
-type ProcessItems = []ProcessItem
-
-// ProcessList defines model for ProcessList.
-type ProcessList struct {
-	Items ProcessItems    `json:"items"`
-	Kind  ProcessListKind `json:"kind"`
-}
-
-// ProcessListKind defines model for ProcessList.Kind.
-type ProcessListKind string
 
 // Property defines model for Property.
 type Property struct {
@@ -2422,6 +2625,9 @@ type PathOptional = string
 // Paths defines model for Paths.
 type Paths = []string
 
+// RedactSecrets defines model for RedactSecrets.
+type RedactSecrets = bool
+
 // ClusterID defines model for RelayClusterID.
 type ClusterID = string
 
@@ -2442,6 +2648,9 @@ type RidOptional = string
 
 // Roles defines model for Roles.
 type Roles = []Role
+
+// InPathExecID An exec id.
+type InPathExecID = openapi_types.UUID
 
 // InPathHeartbeatName Heartbeat name.
 //
@@ -2481,11 +2690,17 @@ type InPathNamespace = string
 // the node that received the request.
 type InPathNodeName = string
 
+// InPathOrchestrationID An orchestration id.
+type InPathOrchestrationID = string
+
 // InQueryAllSlaves Act on all encap instances, and don't act on the host instance if not asked for explicitely.
 type InQueryAllSlaves = bool
 
 // InQueryArrayName defines model for inQueryArrayName.
 type InQueryArrayName = string
+
+// ConfigUpdatedAt defines model for inQueryConfigUpdatedAt.
+type ConfigUpdatedAt = time.Time
 
 // InQueryConfirm defines model for inQueryConfirm.
 type InQueryConfirm = bool
@@ -2502,11 +2717,20 @@ type InQueryDisableRollback = bool
 // InQueryDriver defines model for inQueryDriver.
 type InQueryDriver = string
 
+// InQueryDryRun defines model for inQueryDryRun.
+type InQueryDryRun = bool
+
 // InQueryEnvs defines model for inQueryEnvs.
 type InQueryEnvs = []string
 
 // InQueryEvaluate Dereference, scope and convert the keyword raw value.
 type InQueryEvaluate = bool
+
+// ExecID List the exec of this id, which names one run of one object on one node.
+type ExecID = openapi_types.UUID
+
+// States defines model for inQueryExecState.
+type States = []string
 
 // InQueryForce defines model for inQueryForce.
 type InQueryForce = bool
@@ -2553,8 +2777,17 @@ type InQueryNodeSelector = string
 // InQueryOption defines model for inQueryOption.
 type InQueryOption = string
 
+// OrchestrationID List what was run under this orchestration.
+type OrchestrationID = openapi_types.UUID
+
+// Origins defines model for inQueryOrigin.
+type Origins = []string
+
 // InQueryPoolName defines model for inQueryPoolName.
 type InQueryPoolName = string
+
+// RID defines model for inQueryRIDOptional.
+type RID = string
 
 // InQueryResourceFileName defines model for inQueryResourceFileName.
 type InQueryResourceFileName = string
@@ -2574,11 +2807,14 @@ type InQuerySection = string
 // InQuerySelectorOptional defines model for inQuerySelectorOptional.
 type InQuerySelectorOptional = string
 
-// InQuerySessionID defines model for inQuerySessionID.
-type InQuerySessionID = openapi_types.UUID
+// SessionID defines model for inQuerySessionID.
+type SessionID = openapi_types.UUID
 
 // InQuerySets defines model for inQuerySets.
 type InQuerySets = []string
+
+// InQuerySignal defines model for inQuerySignal.
+type InQuerySignal = string
 
 // InQuerySlaves defines model for inQuerySlaves.
 type InQuerySlaves = []string
@@ -2588,6 +2824,9 @@ type InQueryStateOnly = bool
 
 // InQuerySubset defines model for inQuerySubset.
 type InQuerySubset = string
+
+// SyncTarget defines model for inQuerySyncTarget.
+type SyncTarget = []string
 
 // InQueryTag defines model for inQueryTag.
 type InQueryTag = string
@@ -2600,6 +2839,9 @@ type InQueryTo = string
 
 // InQueryUnsets defines model for inQueryUnsets.
 type InQueryUnsets = []string
+
+// Wait defines model for inQueryWait.
+type Wait = string
 
 // N200 defines model for 200.
 type N200 = Problem
@@ -2621,6 +2863,9 @@ type N408 = Problem
 
 // N409 defines model for 409.
 type N409 = Problem
+
+// N410 defines model for 410.
+type N410 = Problem
 
 // N413 defines model for 413.
 type N413 = Problem
@@ -2693,6 +2938,12 @@ type PatchClusterConfigParams struct {
 	Set    *InQuerySets    `form:"set,omitempty" json:"set,omitempty"`
 }
 
+// GetClusterConfigFileParams defines parameters for GetClusterConfigFile.
+type GetClusterConfigFileParams struct {
+	// RedactSecrets if true, redact secrets in the configuration file
+	RedactSecrets *RedactSecrets `form:"redact-secrets,omitempty" json:"redact-secrets,omitempty"`
+}
+
 // GetClusterConfigKeywordsParams defines parameters for GetClusterConfigKeywords.
 type GetClusterConfigKeywordsParams struct {
 	// Driver show only keywords of this driver
@@ -2755,37 +3006,37 @@ type GetNodesParams struct {
 
 // PostPeerActionDequeueParams defines parameters for PostPeerActionDequeue.
 type PostPeerActionDequeueParams struct {
-	SessionId *InQuerySessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
+	SessionID *SessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
 }
 
 // PostPeerActionFreezeParams defines parameters for PostPeerActionFreeze.
 type PostPeerActionFreezeParams struct {
-	SessionId *InQuerySessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
+	SessionID *SessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
 }
 
 // PostNodeActionPushAssetParams defines parameters for PostNodeActionPushAsset.
 type PostNodeActionPushAssetParams struct {
-	SessionId *InQuerySessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
+	SessionID *SessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
 }
 
 // PostNodeActionPushDiskParams defines parameters for PostNodeActionPushDisk.
 type PostNodeActionPushDiskParams struct {
-	SessionId *InQuerySessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
+	SessionID *SessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
 }
 
 // PostNodeActionPushPkgParams defines parameters for PostNodeActionPushPkg.
 type PostNodeActionPushPkgParams struct {
-	SessionId *InQuerySessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
+	SessionID *SessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
 }
 
 // PostNodeActionScanCapabilitiesParams defines parameters for PostNodeActionScanCapabilities.
 type PostNodeActionScanCapabilitiesParams struct {
-	SessionId *InQuerySessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
+	SessionID *SessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
 }
 
 // PostNodeActionSCSIScanParams defines parameters for PostNodeActionSCSIScan.
 type PostNodeActionSCSIScanParams struct {
-	SessionId *InQuerySessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
+	SessionID *SessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
 
 	// Hba Specify a hba to scan for new block devices.
 	Hba *InQueryHBA `form:"hba,omitempty" json:"hba,omitempty"`
@@ -2799,13 +3050,13 @@ type PostNodeActionSCSIScanParams struct {
 
 // PostNodeActionSysreportParams defines parameters for PostNodeActionSysreport.
 type PostNodeActionSysreportParams struct {
-	Force     *InQueryForce     `form:"force,omitempty" json:"force,omitempty"`
-	SessionId *InQuerySessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
+	Force     *InQueryForce `form:"force,omitempty" json:"force,omitempty"`
+	SessionID *SessionID    `form:"session_id,omitempty" json:"session_id,omitempty"`
 }
 
 // PostPeerActionUnfreezeParams defines parameters for PostPeerActionUnfreeze.
 type PostPeerActionUnfreezeParams struct {
-	SessionId *InQuerySessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
+	SessionID *SessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
 }
 
 // GetNodeConfigParams defines parameters for GetNodeConfig.
@@ -2824,8 +3075,8 @@ type PatchNodeConfigParams struct {
 
 // GetNodeConfigFileParams defines parameters for GetNodeConfigFile.
 type GetNodeConfigFileParams struct {
-	// RedactSecrets if true, redact secrets in the cluster configuration file
-	RedactSecrets *bool `form:"redact-secrets,omitempty" json:"redact-secrets,omitempty"`
+	// RedactSecrets if true, redact secrets in the configuration file
+	RedactSecrets *RedactSecrets `form:"redact-secrets,omitempty" json:"redact-secrets,omitempty"`
 }
 
 // GetNodeConfigKeywordsParams defines parameters for GetNodeConfigKeywords.
@@ -2884,25 +3135,85 @@ type GetDaemonEventsParams struct {
 	Selector *InQuerySelectorOptional `form:"selector,omitempty" json:"selector,omitempty"`
 }
 
-// DeleteDaemonProcessParams defines parameters for DeleteDaemonProcess.
-type DeleteDaemonProcessParams struct {
-	// Pid the pid of the process to kill.
-	Pid *[]int `form:"pid,omitempty" json:"pid,omitempty"`
+// DeleteDaemonExecsParams defines parameters for DeleteDaemonExecs.
+type DeleteDaemonExecsParams struct {
+	// Signal The signal to send, as a name (TERM, SIGTERM) or a number (15). Defaults to SIGKILL.
+	Signal *InQuerySignal `form:"signal,omitempty" json:"signal,omitempty"`
 
-	// Signal the signal to send, as a name (TERM, SIGTERM) or a number (15). Defaults to SIGKILL.
-	Signal *string `form:"signal,omitempty" json:"signal,omitempty"`
+	// DryRun Answer what would be signaled, and signal nothing.
+	DryRun          *InQueryDryRun   `form:"dry_run,omitempty" json:"dry_run,omitempty"`
+	SessionID       *SessionID       `form:"session_id,omitempty" json:"session_id,omitempty"`
+	OrchestrationID *OrchestrationID `form:"orchestration_id,omitempty" json:"orchestration_id,omitempty"`
+	ExecID          *ExecID          `form:"exec_id,omitempty" json:"exec_id,omitempty"`
+	Origins         *Origins         `form:"origin,omitempty" json:"origin,omitempty"`
+
+	// RID a resource selector expression
+	RID *RID `form:"rid,omitempty" json:"rid,omitempty"`
+
+	// Selector selector
+	Selector *InQuerySelectorOptional `form:"selector,omitempty" json:"selector,omitempty"`
 }
 
-// GetDaemonProcessParams defines parameters for GetDaemonProcess.
-type GetDaemonProcessParams struct {
-	// Sub the names of the subsystems to filter the processes
-	Sub *string `form:"sub,omitempty" json:"sub,omitempty"`
+// GetDaemonExecsParams defines parameters for GetDaemonExecs.
+type GetDaemonExecsParams struct {
+	States          *States          `form:"state,omitempty" json:"state,omitempty"`
+	SessionID       *SessionID       `form:"session_id,omitempty" json:"session_id,omitempty"`
+	OrchestrationID *OrchestrationID `form:"orchestration_id,omitempty" json:"orchestration_id,omitempty"`
+	ExecID          *ExecID          `form:"exec_id,omitempty" json:"exec_id,omitempty"`
+	Origins         *Origins         `form:"origin,omitempty" json:"origin,omitempty"`
+
+	// RID a resource selector expression
+	RID *RID `form:"rid,omitempty" json:"rid,omitempty"`
 
 	// Selector selector
 	Selector *InQuerySelectorOptional `form:"selector,omitempty" json:"selector,omitempty"`
 
-	// Rid a resource selector expression
-	Rid *InQueryRid `form:"rid,omitempty" json:"rid,omitempty"`
+	// Wait How long to hold the request until what it asks about has ended.
+	//
+	// Without it the answer is what is known now. With it the request is
+	// held, and answered as soon as the thing ends, so a client waiting for
+	// the end of what it submitted neither polls nor holds an event stream
+	// open for it.
+	//
+	// A request held until the wait expires is answered 408, which says the
+	// thing is still running, and is not an error of the request.
+	Wait *Wait `form:"wait,omitempty" json:"wait,omitempty"`
+}
+
+// GetDaemonExecParams defines parameters for GetDaemonExec.
+type GetDaemonExecParams struct {
+	// Wait How long to hold the request until what it asks about has ended.
+	//
+	// Without it the answer is what is known now. With it the request is
+	// held, and answered as soon as the thing ends, so a client waiting for
+	// the end of what it submitted neither polls nor holds an event stream
+	// open for it.
+	//
+	// A request held until the wait expires is answered 408, which says the
+	// thing is still running, and is not an error of the request.
+	Wait *Wait `form:"wait,omitempty" json:"wait,omitempty"`
+}
+
+// GetDaemonOrchestrationsParams defines parameters for GetDaemonOrchestrations.
+type GetDaemonOrchestrationsParams struct {
+	States *States `form:"state,omitempty" json:"state,omitempty"`
+
+	// Selector selector
+	Selector *InQuerySelectorOptional `form:"selector,omitempty" json:"selector,omitempty"`
+}
+
+// GetDaemonOrchestrationParams defines parameters for GetDaemonOrchestration.
+type GetDaemonOrchestrationParams struct {
+	// Wait How long to hold the request until what it asks about has ended.
+	//
+	// Without it the answer is what is known now. With it the request is
+	// held, and answered as soon as the thing ends, so a client waiting for
+	// the end of what it submitted neither polls nor holds an event stream
+	// open for it.
+	//
+	// A request held until the wait expires is answered 408, which says the
+	// thing is still running, and is not an error of the request.
+	Wait *Wait `form:"wait,omitempty" json:"wait,omitempty"`
 }
 
 // GetNodeDRBDConfigParams defines parameters for GetNodeDRBDConfig.
@@ -2942,7 +3253,7 @@ type PostNodeDRBDSecondaryParams struct {
 type PostInstanceActionBootParams struct {
 	Slaves    *InQueryAllSlaves `form:"slaves,omitempty" json:"slaves,omitempty"`
 	Master    *InQueryMaster    `form:"master,omitempty" json:"master,omitempty"`
-	SessionId *InQuerySessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
+	SessionID *SessionID        `form:"session_id,omitempty" json:"session_id,omitempty"`
 
 	// Rid a resource selector expression
 	Rid    *InQueryRid    `form:"rid,omitempty" json:"rid,omitempty"`
@@ -2950,11 +3261,39 @@ type PostInstanceActionBootParams struct {
 	Subset *InQuerySubset `form:"subset,omitempty" json:"subset,omitempty"`
 	Tag    *InQueryTag    `form:"tag,omitempty" json:"tag,omitempty"`
 	To     *InQueryTo     `form:"to,omitempty" json:"to,omitempty"`
+
+	// ConfigUpdatedAt Refuse the action unless the instance configuration on the node running
+	// it is at least as recent as this timestamp, answering 409 Conflict when
+	// it is older.
+	//
+	// A configuration write answers with the timestamp it produced, in the
+	// OM-Last-Modified header, and a write reaches the peer nodes a moment
+	// after it is acknowledged. Passing that timestamp back here is how a
+	// client that wrote a configuration and then acts on it makes sure every
+	// instance acts on what it wrote, rather than on what it is replacing.
+	//
+	// Optional. Without it the action runs on whatever configuration the node
+	// holds.
+	ConfigUpdatedAt *ConfigUpdatedAt `form:"config_updated_at,omitempty" json:"config_updated_at,omitempty"`
 }
 
 // PostInstanceActionDeleteParams defines parameters for PostInstanceActionDelete.
 type PostInstanceActionDeleteParams struct {
-	SessionId *InQuerySessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
+	SessionID *SessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
+
+	// ConfigUpdatedAt Refuse the action unless the instance configuration on the node running
+	// it is at least as recent as this timestamp, answering 409 Conflict when
+	// it is older.
+	//
+	// A configuration write answers with the timestamp it produced, in the
+	// OM-Last-Modified header, and a write reaches the peer nodes a moment
+	// after it is acknowledged. Passing that timestamp back here is how a
+	// client that wrote a configuration and then acts on it makes sure every
+	// instance acts on what it wrote, rather than on what it is replacing.
+	//
+	// Optional. Without it the action runs on whatever configuration the node
+	// holds.
+	ConfigUpdatedAt *ConfigUpdatedAt `form:"config_updated_at,omitempty" json:"config_updated_at,omitempty"`
 }
 
 // PostInstanceActionFreezeParams defines parameters for PostInstanceActionFreeze.
@@ -2962,27 +3301,148 @@ type PostInstanceActionFreezeParams struct {
 	Slaves    *InQueryAllSlaves `form:"slaves,omitempty" json:"slaves,omitempty"`
 	Master    *InQueryMaster    `form:"master,omitempty" json:"master,omitempty"`
 	Slave     *InQuerySlaves    `form:"slave,omitempty" json:"slave,omitempty"`
-	SessionId *InQuerySessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
+	SessionID *SessionID        `form:"session_id,omitempty" json:"session_id,omitempty"`
+
+	// ConfigUpdatedAt Refuse the action unless the instance configuration on the node running
+	// it is at least as recent as this timestamp, answering 409 Conflict when
+	// it is older.
+	//
+	// A configuration write answers with the timestamp it produced, in the
+	// OM-Last-Modified header, and a write reaches the peer nodes a moment
+	// after it is acknowledged. Passing that timestamp back here is how a
+	// client that wrote a configuration and then acts on it makes sure every
+	// instance acts on what it wrote, rather than on what it is replacing.
+	//
+	// Optional. Without it the action runs on whatever configuration the node
+	// holds.
+	ConfigUpdatedAt *ConfigUpdatedAt `form:"config_updated_at,omitempty" json:"config_updated_at,omitempty"`
+}
+
+// PostInstanceActionFullParams defines parameters for PostInstanceActionFull.
+type PostInstanceActionFullParams struct {
+	SessionID *SessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
+
+	// Rid a resource selector expression
+	Rid    *InQueryRid    `form:"rid,omitempty" json:"rid,omitempty"`
+	Subset *InQuerySubset `form:"subset,omitempty" json:"subset,omitempty"`
+	Tag    *InQueryTag    `form:"tag,omitempty" json:"tag,omitempty"`
+
+	// ConfigUpdatedAt Refuse the action unless the instance configuration on the node running
+	// it is at least as recent as this timestamp, answering 409 Conflict when
+	// it is older.
+	//
+	// A configuration write answers with the timestamp it produced, in the
+	// OM-Last-Modified header, and a write reaches the peer nodes a moment
+	// after it is acknowledged. Passing that timestamp back here is how a
+	// client that wrote a configuration and then acts on it makes sure every
+	// instance acts on what it wrote, rather than on what it is replacing.
+	//
+	// Optional. Without it the action runs on whatever configuration the node
+	// holds.
+	ConfigUpdatedAt *ConfigUpdatedAt `form:"config_updated_at,omitempty" json:"config_updated_at,omitempty"`
+	Force           *InQueryForce    `form:"force,omitempty" json:"force,omitempty"`
+
+	// SyncTarget The peers to sync to, as node or drpnode names.
+	SyncTarget *SyncTarget `form:"target,omitempty" json:"target,omitempty"`
 }
 
 // PostInstanceActionInfoParams defines parameters for PostInstanceActionInfo.
 type PostInstanceActionInfoParams struct {
 	// Rid a resource selector expression
-	Rid       *InQueryRid       `form:"rid,omitempty" json:"rid,omitempty"`
-	SessionId *InQuerySessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
+	Rid       *InQueryRid `form:"rid,omitempty" json:"rid,omitempty"`
+	SessionID *SessionID  `form:"session_id,omitempty" json:"session_id,omitempty"`
+
+	// ConfigUpdatedAt Refuse the action unless the instance configuration on the node running
+	// it is at least as recent as this timestamp, answering 409 Conflict when
+	// it is older.
+	//
+	// A configuration write answers with the timestamp it produced, in the
+	// OM-Last-Modified header, and a write reaches the peer nodes a moment
+	// after it is acknowledged. Passing that timestamp back here is how a
+	// client that wrote a configuration and then acts on it makes sure every
+	// instance acts on what it wrote, rather than on what it is replacing.
+	//
+	// Optional. Without it the action runs on whatever configuration the node
+	// holds.
+	ConfigUpdatedAt *ConfigUpdatedAt `form:"config_updated_at,omitempty" json:"config_updated_at,omitempty"`
 }
 
-// PostInstanceActionPGUpdateParams defines parameters for PostInstanceActionPGUpdate.
-type PostInstanceActionPGUpdateParams struct {
+// PostInstanceActionIngestParams defines parameters for PostInstanceActionIngest.
+type PostInstanceActionIngestParams struct {
+	SessionID *SessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
+
+	// Rid a resource selector expression
+	Rid    *InQueryRid    `form:"rid,omitempty" json:"rid,omitempty"`
+	Subset *InQuerySubset `form:"subset,omitempty" json:"subset,omitempty"`
+	Tag    *InQueryTag    `form:"tag,omitempty" json:"tag,omitempty"`
+
+	// ConfigUpdatedAt Refuse the action unless the instance configuration on the node running
+	// it is at least as recent as this timestamp, answering 409 Conflict when
+	// it is older.
+	//
+	// A configuration write answers with the timestamp it produced, in the
+	// OM-Last-Modified header, and a write reaches the peer nodes a moment
+	// after it is acknowledged. Passing that timestamp back here is how a
+	// client that wrote a configuration and then acts on it makes sure every
+	// instance acts on what it wrote, rather than on what it is replacing.
+	//
+	// Optional. Without it the action runs on whatever configuration the node
+	// holds.
+	ConfigUpdatedAt *ConfigUpdatedAt `form:"config_updated_at,omitempty" json:"config_updated_at,omitempty"`
+}
+
+// PostInstanceActionPGResetParams defines parameters for PostInstanceActionPGReset.
+type PostInstanceActionPGResetParams struct {
 	Slaves    *InQueryAllSlaves `form:"slaves,omitempty" json:"slaves,omitempty"`
 	Master    *InQueryMaster    `form:"master,omitempty" json:"master,omitempty"`
-	SessionId *InQuerySessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
+	SessionID *SessionID        `form:"session_id,omitempty" json:"session_id,omitempty"`
 
 	// Rid a resource selector expression
 	Rid    *InQueryRid    `form:"rid,omitempty" json:"rid,omitempty"`
 	Slave  *InQuerySlaves `form:"slave,omitempty" json:"slave,omitempty"`
 	Subset *InQuerySubset `form:"subset,omitempty" json:"subset,omitempty"`
 	Tag    *InQueryTag    `form:"tag,omitempty" json:"tag,omitempty"`
+
+	// ConfigUpdatedAt Refuse the action unless the instance configuration on the node running
+	// it is at least as recent as this timestamp, answering 409 Conflict when
+	// it is older.
+	//
+	// A configuration write answers with the timestamp it produced, in the
+	// OM-Last-Modified header, and a write reaches the peer nodes a moment
+	// after it is acknowledged. Passing that timestamp back here is how a
+	// client that wrote a configuration and then acts on it makes sure every
+	// instance acts on what it wrote, rather than on what it is replacing.
+	//
+	// Optional. Without it the action runs on whatever configuration the node
+	// holds.
+	ConfigUpdatedAt *ConfigUpdatedAt `form:"config_updated_at,omitempty" json:"config_updated_at,omitempty"`
+}
+
+// PostInstanceActionPGUpdateParams defines parameters for PostInstanceActionPGUpdate.
+type PostInstanceActionPGUpdateParams struct {
+	Slaves    *InQueryAllSlaves `form:"slaves,omitempty" json:"slaves,omitempty"`
+	Master    *InQueryMaster    `form:"master,omitempty" json:"master,omitempty"`
+	SessionID *SessionID        `form:"session_id,omitempty" json:"session_id,omitempty"`
+
+	// Rid a resource selector expression
+	Rid    *InQueryRid    `form:"rid,omitempty" json:"rid,omitempty"`
+	Slave  *InQuerySlaves `form:"slave,omitempty" json:"slave,omitempty"`
+	Subset *InQuerySubset `form:"subset,omitempty" json:"subset,omitempty"`
+	Tag    *InQueryTag    `form:"tag,omitempty" json:"tag,omitempty"`
+
+	// ConfigUpdatedAt Refuse the action unless the instance configuration on the node running
+	// it is at least as recent as this timestamp, answering 409 Conflict when
+	// it is older.
+	//
+	// A configuration write answers with the timestamp it produced, in the
+	// OM-Last-Modified header, and a write reaches the peer nodes a moment
+	// after it is acknowledged. Passing that timestamp back here is how a
+	// client that wrote a configuration and then acts on it makes sure every
+	// instance acts on what it wrote, rather than on what it is replacing.
+	//
+	// Optional. Without it the action runs on whatever configuration the node
+	// holds.
+	ConfigUpdatedAt *ConfigUpdatedAt `form:"config_updated_at,omitempty" json:"config_updated_at,omitempty"`
 }
 
 // PostInstanceActionProvisionParams defines parameters for PostInstanceActionProvision.
@@ -2992,7 +3452,7 @@ type PostInstanceActionProvisionParams struct {
 	Force           *InQueryForce           `form:"force,omitempty" json:"force,omitempty"`
 	Leader          *InQueryLeader          `form:"leader,omitempty" json:"leader,omitempty"`
 	Master          *InQueryMaster          `form:"master,omitempty" json:"master,omitempty"`
-	SessionId       *InQuerySessionID       `form:"session_id,omitempty" json:"session_id,omitempty"`
+	SessionID       *SessionID              `form:"session_id,omitempty" json:"session_id,omitempty"`
 
 	// Rid a resource selector expression
 	Rid       *InQueryRid       `form:"rid,omitempty" json:"rid,omitempty"`
@@ -3001,6 +3461,20 @@ type PostInstanceActionProvisionParams struct {
 	Subset    *InQuerySubset    `form:"subset,omitempty" json:"subset,omitempty"`
 	Tag       *InQueryTag       `form:"tag,omitempty" json:"tag,omitempty"`
 	To        *InQueryTo        `form:"to,omitempty" json:"to,omitempty"`
+
+	// ConfigUpdatedAt Refuse the action unless the instance configuration on the node running
+	// it is at least as recent as this timestamp, answering 409 Conflict when
+	// it is older.
+	//
+	// A configuration write answers with the timestamp it produced, in the
+	// OM-Last-Modified header, and a write reaches the peer nodes a moment
+	// after it is acknowledged. Passing that timestamp back here is how a
+	// client that wrote a configuration and then acts on it makes sure every
+	// instance acts on what it wrote, rather than on what it is replacing.
+	//
+	// Optional. Without it the action runs on whatever configuration the node
+	// holds.
+	ConfigUpdatedAt *ConfigUpdatedAt `form:"config_updated_at,omitempty" json:"config_updated_at,omitempty"`
 }
 
 // PostInstanceActionPRStartParams defines parameters for PostInstanceActionPRStart.
@@ -3009,7 +3483,7 @@ type PostInstanceActionPRStartParams struct {
 	DisableRollback *InQueryDisableRollback `form:"disable_rollback,omitempty" json:"disable_rollback,omitempty"`
 	Force           *InQueryForce           `form:"force,omitempty" json:"force,omitempty"`
 	Master          *InQueryMaster          `form:"master,omitempty" json:"master,omitempty"`
-	SessionId       *InQuerySessionID       `form:"session_id,omitempty" json:"session_id,omitempty"`
+	SessionID       *SessionID              `form:"session_id,omitempty" json:"session_id,omitempty"`
 
 	// Rid a resource selector expression
 	Rid    *InQueryRid    `form:"rid,omitempty" json:"rid,omitempty"`
@@ -3017,6 +3491,20 @@ type PostInstanceActionPRStartParams struct {
 	Subset *InQuerySubset `form:"subset,omitempty" json:"subset,omitempty"`
 	Tag    *InQueryTag    `form:"tag,omitempty" json:"tag,omitempty"`
 	To     *InQueryTo     `form:"to,omitempty" json:"to,omitempty"`
+
+	// ConfigUpdatedAt Refuse the action unless the instance configuration on the node running
+	// it is at least as recent as this timestamp, answering 409 Conflict when
+	// it is older.
+	//
+	// A configuration write answers with the timestamp it produced, in the
+	// OM-Last-Modified header, and a write reaches the peer nodes a moment
+	// after it is acknowledged. Passing that timestamp back here is how a
+	// client that wrote a configuration and then acts on it makes sure every
+	// instance acts on what it wrote, rather than on what it is replacing.
+	//
+	// Optional. Without it the action runs on whatever configuration the node
+	// holds.
+	ConfigUpdatedAt *ConfigUpdatedAt `form:"config_updated_at,omitempty" json:"config_updated_at,omitempty"`
 }
 
 // PostInstanceActionPRStopParams defines parameters for PostInstanceActionPRStop.
@@ -3025,7 +3513,7 @@ type PostInstanceActionPRStopParams struct {
 	DisableRollback *InQueryDisableRollback `form:"disable_rollback,omitempty" json:"disable_rollback,omitempty"`
 	Force           *InQueryForce           `form:"force,omitempty" json:"force,omitempty"`
 	Master          *InQueryMaster          `form:"master,omitempty" json:"master,omitempty"`
-	SessionId       *InQuerySessionID       `form:"session_id,omitempty" json:"session_id,omitempty"`
+	SessionID       *SessionID              `form:"session_id,omitempty" json:"session_id,omitempty"`
 
 	// Rid a resource selector expression
 	Rid    *InQueryRid    `form:"rid,omitempty" json:"rid,omitempty"`
@@ -3033,6 +3521,20 @@ type PostInstanceActionPRStopParams struct {
 	Subset *InQuerySubset `form:"subset,omitempty" json:"subset,omitempty"`
 	Tag    *InQueryTag    `form:"tag,omitempty" json:"tag,omitempty"`
 	To     *InQueryTo     `form:"to,omitempty" json:"to,omitempty"`
+
+	// ConfigUpdatedAt Refuse the action unless the instance configuration on the node running
+	// it is at least as recent as this timestamp, answering 409 Conflict when
+	// it is older.
+	//
+	// A configuration write answers with the timestamp it produced, in the
+	// OM-Last-Modified header, and a write reaches the peer nodes a moment
+	// after it is acknowledged. Passing that timestamp back here is how a
+	// client that wrote a configuration and then acts on it makes sure every
+	// instance acts on what it wrote, rather than on what it is replacing.
+	//
+	// Optional. Without it the action runs on whatever configuration the node
+	// holds.
+	ConfigUpdatedAt *ConfigUpdatedAt `form:"config_updated_at,omitempty" json:"config_updated_at,omitempty"`
 }
 
 // PostInstanceActionRestartParams defines parameters for PostInstanceActionRestart.
@@ -3041,7 +3543,7 @@ type PostInstanceActionRestartParams struct {
 	DisableRollback *InQueryDisableRollback `form:"disable_rollback,omitempty" json:"disable_rollback,omitempty"`
 	Force           *InQueryForce           `form:"force,omitempty" json:"force,omitempty"`
 	Master          *InQueryMaster          `form:"master,omitempty" json:"master,omitempty"`
-	SessionId       *InQuerySessionID       `form:"session_id,omitempty" json:"session_id,omitempty"`
+	SessionID       *SessionID              `form:"session_id,omitempty" json:"session_id,omitempty"`
 
 	// Rid a resource selector expression
 	Rid    *InQueryRid    `form:"rid,omitempty" json:"rid,omitempty"`
@@ -3049,6 +3551,45 @@ type PostInstanceActionRestartParams struct {
 	Subset *InQuerySubset `form:"subset,omitempty" json:"subset,omitempty"`
 	Tag    *InQueryTag    `form:"tag,omitempty" json:"tag,omitempty"`
 	To     *InQueryTo     `form:"to,omitempty" json:"to,omitempty"`
+
+	// ConfigUpdatedAt Refuse the action unless the instance configuration on the node running
+	// it is at least as recent as this timestamp, answering 409 Conflict when
+	// it is older.
+	//
+	// A configuration write answers with the timestamp it produced, in the
+	// OM-Last-Modified header, and a write reaches the peer nodes a moment
+	// after it is acknowledged. Passing that timestamp back here is how a
+	// client that wrote a configuration and then acts on it makes sure every
+	// instance acts on what it wrote, rather than on what it is replacing.
+	//
+	// Optional. Without it the action runs on whatever configuration the node
+	// holds.
+	ConfigUpdatedAt *ConfigUpdatedAt `form:"config_updated_at,omitempty" json:"config_updated_at,omitempty"`
+}
+
+// PostInstanceActionResyncParams defines parameters for PostInstanceActionResync.
+type PostInstanceActionResyncParams struct {
+	SessionID *SessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
+
+	// Rid a resource selector expression
+	Rid    *InQueryRid    `form:"rid,omitempty" json:"rid,omitempty"`
+	Subset *InQuerySubset `form:"subset,omitempty" json:"subset,omitempty"`
+	Tag    *InQueryTag    `form:"tag,omitempty" json:"tag,omitempty"`
+
+	// ConfigUpdatedAt Refuse the action unless the instance configuration on the node running
+	// it is at least as recent as this timestamp, answering 409 Conflict when
+	// it is older.
+	//
+	// A configuration write answers with the timestamp it produced, in the
+	// OM-Last-Modified header, and a write reaches the peer nodes a moment
+	// after it is acknowledged. Passing that timestamp back here is how a
+	// client that wrote a configuration and then acts on it makes sure every
+	// instance acts on what it wrote, rather than on what it is replacing.
+	//
+	// Optional. Without it the action runs on whatever configuration the node
+	// holds.
+	ConfigUpdatedAt *ConfigUpdatedAt `form:"config_updated_at,omitempty" json:"config_updated_at,omitempty"`
+	Force           *InQueryForce    `form:"force,omitempty" json:"force,omitempty"`
 }
 
 // PostInstanceActionRunParams defines parameters for PostInstanceActionRun.
@@ -3058,7 +3599,7 @@ type PostInstanceActionRunParams struct {
 	Cron      *InQueryCron      `form:"cron,omitempty" json:"cron,omitempty"`
 	Force     *InQueryForce     `form:"force,omitempty" json:"force,omitempty"`
 	Master    *InQueryMaster    `form:"master,omitempty" json:"master,omitempty"`
-	SessionId *InQuerySessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
+	SessionID *SessionID        `form:"session_id,omitempty" json:"session_id,omitempty"`
 
 	// Rid a resource selector expression
 	Rid    *InQueryRid    `form:"rid,omitempty" json:"rid,omitempty"`
@@ -3067,6 +3608,20 @@ type PostInstanceActionRunParams struct {
 	Tag    *InQueryTag    `form:"tag,omitempty" json:"tag,omitempty"`
 	To     *InQueryTo     `form:"to,omitempty" json:"to,omitempty"`
 	Env    *InQueryEnvs   `form:"env,omitempty" json:"env,omitempty"`
+
+	// ConfigUpdatedAt Refuse the action unless the instance configuration on the node running
+	// it is at least as recent as this timestamp, answering 409 Conflict when
+	// it is older.
+	//
+	// A configuration write answers with the timestamp it produced, in the
+	// OM-Last-Modified header, and a write reaches the peer nodes a moment
+	// after it is acknowledged. Passing that timestamp back here is how a
+	// client that wrote a configuration and then acts on it makes sure every
+	// instance acts on what it wrote, rather than on what it is replacing.
+	//
+	// Optional. Without it the action runs on whatever configuration the node
+	// holds.
+	ConfigUpdatedAt *ConfigUpdatedAt `form:"config_updated_at,omitempty" json:"config_updated_at,omitempty"`
 }
 
 // PostInstanceActionShutdownParams defines parameters for PostInstanceActionShutdown.
@@ -3074,7 +3629,7 @@ type PostInstanceActionShutdownParams struct {
 	Slaves    *InQueryAllSlaves `form:"slaves,omitempty" json:"slaves,omitempty"`
 	Force     *InQueryForce     `form:"force,omitempty" json:"force,omitempty"`
 	Master    *InQueryMaster    `form:"master,omitempty" json:"master,omitempty"`
-	SessionId *InQuerySessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
+	SessionID *SessionID        `form:"session_id,omitempty" json:"session_id,omitempty"`
 
 	// Rid a resource selector expression
 	Rid    *InQueryRid    `form:"rid,omitempty" json:"rid,omitempty"`
@@ -3082,6 +3637,45 @@ type PostInstanceActionShutdownParams struct {
 	Subset *InQuerySubset `form:"subset,omitempty" json:"subset,omitempty"`
 	Tag    *InQueryTag    `form:"tag,omitempty" json:"tag,omitempty"`
 	To     *InQueryTo     `form:"to,omitempty" json:"to,omitempty"`
+
+	// ConfigUpdatedAt Refuse the action unless the instance configuration on the node running
+	// it is at least as recent as this timestamp, answering 409 Conflict when
+	// it is older.
+	//
+	// A configuration write answers with the timestamp it produced, in the
+	// OM-Last-Modified header, and a write reaches the peer nodes a moment
+	// after it is acknowledged. Passing that timestamp back here is how a
+	// client that wrote a configuration and then acts on it makes sure every
+	// instance acts on what it wrote, rather than on what it is replacing.
+	//
+	// Optional. Without it the action runs on whatever configuration the node
+	// holds.
+	ConfigUpdatedAt *ConfigUpdatedAt `form:"config_updated_at,omitempty" json:"config_updated_at,omitempty"`
+}
+
+// PostInstanceActionSplitParams defines parameters for PostInstanceActionSplit.
+type PostInstanceActionSplitParams struct {
+	SessionID *SessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
+
+	// Rid a resource selector expression
+	Rid    *InQueryRid    `form:"rid,omitempty" json:"rid,omitempty"`
+	Subset *InQuerySubset `form:"subset,omitempty" json:"subset,omitempty"`
+	Tag    *InQueryTag    `form:"tag,omitempty" json:"tag,omitempty"`
+
+	// ConfigUpdatedAt Refuse the action unless the instance configuration on the node running
+	// it is at least as recent as this timestamp, answering 409 Conflict when
+	// it is older.
+	//
+	// A configuration write answers with the timestamp it produced, in the
+	// OM-Last-Modified header, and a write reaches the peer nodes a moment
+	// after it is acknowledged. Passing that timestamp back here is how a
+	// client that wrote a configuration and then acts on it makes sure every
+	// instance acts on what it wrote, rather than on what it is replacing.
+	//
+	// Optional. Without it the action runs on whatever configuration the node
+	// holds.
+	ConfigUpdatedAt *ConfigUpdatedAt `form:"config_updated_at,omitempty" json:"config_updated_at,omitempty"`
+	Force           *InQueryForce    `form:"force,omitempty" json:"force,omitempty"`
 }
 
 // PostInstanceActionStartParams defines parameters for PostInstanceActionStart.
@@ -3090,7 +3684,7 @@ type PostInstanceActionStartParams struct {
 	DisableRollback *InQueryDisableRollback `form:"disable_rollback,omitempty" json:"disable_rollback,omitempty"`
 	Force           *InQueryForce           `form:"force,omitempty" json:"force,omitempty"`
 	Master          *InQueryMaster          `form:"master,omitempty" json:"master,omitempty"`
-	SessionId       *InQuerySessionID       `form:"session_id,omitempty" json:"session_id,omitempty"`
+	SessionID       *SessionID              `form:"session_id,omitempty" json:"session_id,omitempty"`
 
 	// Rid a resource selector expression
 	Rid    *InQueryRid    `form:"rid,omitempty" json:"rid,omitempty"`
@@ -3098,6 +3692,20 @@ type PostInstanceActionStartParams struct {
 	Subset *InQuerySubset `form:"subset,omitempty" json:"subset,omitempty"`
 	Tag    *InQueryTag    `form:"tag,omitempty" json:"tag,omitempty"`
 	To     *InQueryTo     `form:"to,omitempty" json:"to,omitempty"`
+
+	// ConfigUpdatedAt Refuse the action unless the instance configuration on the node running
+	// it is at least as recent as this timestamp, answering 409 Conflict when
+	// it is older.
+	//
+	// A configuration write answers with the timestamp it produced, in the
+	// OM-Last-Modified header, and a write reaches the peer nodes a moment
+	// after it is acknowledged. Passing that timestamp back here is how a
+	// client that wrote a configuration and then acts on it makes sure every
+	// instance acts on what it wrote, rather than on what it is replacing.
+	//
+	// Optional. Without it the action runs on whatever configuration the node
+	// holds.
+	ConfigUpdatedAt *ConfigUpdatedAt `form:"config_updated_at,omitempty" json:"config_updated_at,omitempty"`
 }
 
 // PostInstanceActionStartStandbyParams defines parameters for PostInstanceActionStartStandby.
@@ -3106,7 +3714,7 @@ type PostInstanceActionStartStandbyParams struct {
 	DisableRollback *InQueryDisableRollback `form:"disable_rollback,omitempty" json:"disable_rollback,omitempty"`
 	Force           *InQueryForce           `form:"force,omitempty" json:"force,omitempty"`
 	Master          *InQueryMaster          `form:"master,omitempty" json:"master,omitempty"`
-	SessionId       *InQuerySessionID       `form:"session_id,omitempty" json:"session_id,omitempty"`
+	SessionID       *SessionID              `form:"session_id,omitempty" json:"session_id,omitempty"`
 
 	// Rid a resource selector expression
 	Rid    *InQueryRid    `form:"rid,omitempty" json:"rid,omitempty"`
@@ -3114,11 +3722,39 @@ type PostInstanceActionStartStandbyParams struct {
 	Subset *InQuerySubset `form:"subset,omitempty" json:"subset,omitempty"`
 	Tag    *InQueryTag    `form:"tag,omitempty" json:"tag,omitempty"`
 	To     *InQueryTo     `form:"to,omitempty" json:"to,omitempty"`
+
+	// ConfigUpdatedAt Refuse the action unless the instance configuration on the node running
+	// it is at least as recent as this timestamp, answering 409 Conflict when
+	// it is older.
+	//
+	// A configuration write answers with the timestamp it produced, in the
+	// OM-Last-Modified header, and a write reaches the peer nodes a moment
+	// after it is acknowledged. Passing that timestamp back here is how a
+	// client that wrote a configuration and then acts on it makes sure every
+	// instance acts on what it wrote, rather than on what it is replacing.
+	//
+	// Optional. Without it the action runs on whatever configuration the node
+	// holds.
+	ConfigUpdatedAt *ConfigUpdatedAt `form:"config_updated_at,omitempty" json:"config_updated_at,omitempty"`
 }
 
 // PostInstanceActionStatusParams defines parameters for PostInstanceActionStatus.
 type PostInstanceActionStatusParams struct {
-	SessionId *InQuerySessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
+	SessionID *SessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
+
+	// ConfigUpdatedAt Refuse the action unless the instance configuration on the node running
+	// it is at least as recent as this timestamp, answering 409 Conflict when
+	// it is older.
+	//
+	// A configuration write answers with the timestamp it produced, in the
+	// OM-Last-Modified header, and a write reaches the peer nodes a moment
+	// after it is acknowledged. Passing that timestamp back here is how a
+	// client that wrote a configuration and then acts on it makes sure every
+	// instance acts on what it wrote, rather than on what it is replacing.
+	//
+	// Optional. Without it the action runs on whatever configuration the node
+	// holds.
+	ConfigUpdatedAt *ConfigUpdatedAt `form:"config_updated_at,omitempty" json:"config_updated_at,omitempty"`
 }
 
 // PostInstanceActionStopParams defines parameters for PostInstanceActionStop.
@@ -3127,7 +3763,7 @@ type PostInstanceActionStopParams struct {
 	Force     *InQueryForce     `form:"force,omitempty" json:"force,omitempty"`
 	Master    *InQueryMaster    `form:"master,omitempty" json:"master,omitempty"`
 	MoveTo    *InQueryMoveTo    `form:"move-to,omitempty" json:"move-to,omitempty"`
-	SessionId *InQuerySessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
+	SessionID *SessionID        `form:"session_id,omitempty" json:"session_id,omitempty"`
 
 	// Rid a resource selector expression
 	Rid    *InQueryRid    `form:"rid,omitempty" json:"rid,omitempty"`
@@ -3135,16 +3771,20 @@ type PostInstanceActionStopParams struct {
 	Subset *InQuerySubset `form:"subset,omitempty" json:"subset,omitempty"`
 	Tag    *InQueryTag    `form:"tag,omitempty" json:"tag,omitempty"`
 	To     *InQueryTo     `form:"to,omitempty" json:"to,omitempty"`
-}
 
-// PostInstanceActionSyncIngestParams defines parameters for PostInstanceActionSyncIngest.
-type PostInstanceActionSyncIngestParams struct {
-	SessionId *InQuerySessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
-
-	// Rid a resource selector expression
-	Rid    *InQueryRid    `form:"rid,omitempty" json:"rid,omitempty"`
-	Subset *InQuerySubset `form:"subset,omitempty" json:"subset,omitempty"`
-	Tag    *InQueryTag    `form:"tag,omitempty" json:"tag,omitempty"`
+	// ConfigUpdatedAt Refuse the action unless the instance configuration on the node running
+	// it is at least as recent as this timestamp, answering 409 Conflict when
+	// it is older.
+	//
+	// A configuration write answers with the timestamp it produced, in the
+	// OM-Last-Modified header, and a write reaches the peer nodes a moment
+	// after it is acknowledged. Passing that timestamp back here is how a
+	// client that wrote a configuration and then acts on it makes sure every
+	// instance acts on what it wrote, rather than on what it is replacing.
+	//
+	// Optional. Without it the action runs on whatever configuration the node
+	// holds.
+	ConfigUpdatedAt *ConfigUpdatedAt `form:"config_updated_at,omitempty" json:"config_updated_at,omitempty"`
 }
 
 // PostInstanceActionUnfreezeParams defines parameters for PostInstanceActionUnfreeze.
@@ -3152,7 +3792,21 @@ type PostInstanceActionUnfreezeParams struct {
 	Slaves    *InQueryAllSlaves `form:"slaves,omitempty" json:"slaves,omitempty"`
 	Master    *InQueryMaster    `form:"master,omitempty" json:"master,omitempty"`
 	Slave     *InQuerySlaves    `form:"slave,omitempty" json:"slave,omitempty"`
-	SessionId *InQuerySessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
+	SessionID *SessionID        `form:"session_id,omitempty" json:"session_id,omitempty"`
+
+	// ConfigUpdatedAt Refuse the action unless the instance configuration on the node running
+	// it is at least as recent as this timestamp, answering 409 Conflict when
+	// it is older.
+	//
+	// A configuration write answers with the timestamp it produced, in the
+	// OM-Last-Modified header, and a write reaches the peer nodes a moment
+	// after it is acknowledged. Passing that timestamp back here is how a
+	// client that wrote a configuration and then acts on it makes sure every
+	// instance acts on what it wrote, rather than on what it is replacing.
+	//
+	// Optional. Without it the action runs on whatever configuration the node
+	// holds.
+	ConfigUpdatedAt *ConfigUpdatedAt `form:"config_updated_at,omitempty" json:"config_updated_at,omitempty"`
 }
 
 // PostInstanceActionUnprovisionParams defines parameters for PostInstanceActionUnprovision.
@@ -3161,7 +3815,7 @@ type PostInstanceActionUnprovisionParams struct {
 	Force     *InQueryForce     `form:"force,omitempty" json:"force,omitempty"`
 	Leader    *InQueryLeader    `form:"leader,omitempty" json:"leader,omitempty"`
 	Master    *InQueryMaster    `form:"master,omitempty" json:"master,omitempty"`
-	SessionId *InQuerySessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
+	SessionID *SessionID        `form:"session_id,omitempty" json:"session_id,omitempty"`
 
 	// Rid a resource selector expression
 	Rid       *InQueryRid       `form:"rid,omitempty" json:"rid,omitempty"`
@@ -3170,6 +3824,48 @@ type PostInstanceActionUnprovisionParams struct {
 	Subset    *InQuerySubset    `form:"subset,omitempty" json:"subset,omitempty"`
 	Tag       *InQueryTag       `form:"tag,omitempty" json:"tag,omitempty"`
 	To        *InQueryTo        `form:"to,omitempty" json:"to,omitempty"`
+
+	// ConfigUpdatedAt Refuse the action unless the instance configuration on the node running
+	// it is at least as recent as this timestamp, answering 409 Conflict when
+	// it is older.
+	//
+	// A configuration write answers with the timestamp it produced, in the
+	// OM-Last-Modified header, and a write reaches the peer nodes a moment
+	// after it is acknowledged. Passing that timestamp back here is how a
+	// client that wrote a configuration and then acts on it makes sure every
+	// instance acts on what it wrote, rather than on what it is replacing.
+	//
+	// Optional. Without it the action runs on whatever configuration the node
+	// holds.
+	ConfigUpdatedAt *ConfigUpdatedAt `form:"config_updated_at,omitempty" json:"config_updated_at,omitempty"`
+}
+
+// PostInstanceActionUpdateParams defines parameters for PostInstanceActionUpdate.
+type PostInstanceActionUpdateParams struct {
+	SessionID *SessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
+
+	// Rid a resource selector expression
+	Rid    *InQueryRid    `form:"rid,omitempty" json:"rid,omitempty"`
+	Subset *InQuerySubset `form:"subset,omitempty" json:"subset,omitempty"`
+	Tag    *InQueryTag    `form:"tag,omitempty" json:"tag,omitempty"`
+
+	// ConfigUpdatedAt Refuse the action unless the instance configuration on the node running
+	// it is at least as recent as this timestamp, answering 409 Conflict when
+	// it is older.
+	//
+	// A configuration write answers with the timestamp it produced, in the
+	// OM-Last-Modified header, and a write reaches the peer nodes a moment
+	// after it is acknowledged. Passing that timestamp back here is how a
+	// client that wrote a configuration and then acts on it makes sure every
+	// instance acts on what it wrote, rather than on what it is replacing.
+	//
+	// Optional. Without it the action runs on whatever configuration the node
+	// holds.
+	ConfigUpdatedAt *ConfigUpdatedAt `form:"config_updated_at,omitempty" json:"config_updated_at,omitempty"`
+	Force           *InQueryForce    `form:"force,omitempty" json:"force,omitempty"`
+
+	// SyncTarget The peers to sync to, as node or drpnode names.
+	SyncTarget *SyncTarget `form:"target,omitempty" json:"target,omitempty"`
 }
 
 // PostInstanceResourceConsoleParams defines parameters for PostInstanceResourceConsole.
@@ -3262,6 +3958,23 @@ type PostSvcEnableParams struct {
 	Tag    *InQueryTag    `form:"tag,omitempty" json:"tag,omitempty"`
 }
 
+// PostObjectActionResizeParams defines parameters for PostObjectActionResize.
+type PostObjectActionResizeParams struct {
+	// ConfigUpdatedAt Refuse the action unless the instance configuration on the node running
+	// it is at least as recent as this timestamp, answering 409 Conflict when
+	// it is older.
+	//
+	// A configuration write answers with the timestamp it produced, in the
+	// OM-Last-Modified header, and a write reaches the peer nodes a moment
+	// after it is acknowledged. Passing that timestamp back here is how a
+	// client that wrote a configuration and then acts on it makes sure every
+	// instance acts on what it wrote, rather than on what it is replacing.
+	//
+	// Optional. Without it the action runs on whatever configuration the node
+	// holds.
+	ConfigUpdatedAt *ConfigUpdatedAt `form:"config_updated_at,omitempty" json:"config_updated_at,omitempty"`
+}
+
 // GetObjectConfigParams defines parameters for GetObjectConfig.
 type GetObjectConfigParams struct {
 	Evaluate    *InQueryEvaluate    `form:"evaluate,omitempty" json:"evaluate,omitempty"`
@@ -3278,8 +3991,8 @@ type PatchObjectConfigParams struct {
 
 // GetObjectConfigFileParams defines parameters for GetObjectConfigFile.
 type GetObjectConfigFileParams struct {
-	// RedactSecrets if true, redact secrets in the cluster configuration file
-	RedactSecrets *bool `form:"redact-secrets,omitempty" json:"redact-secrets,omitempty"`
+	// RedactSecrets if true, redact secrets in the configuration file
+	RedactSecrets *RedactSecrets `form:"redact-secrets,omitempty" json:"redact-secrets,omitempty"`
 }
 
 // GetObjectConfigKeywordsParams defines parameters for GetObjectConfigKeywords.
@@ -3376,20 +4089,32 @@ type GetResourcesParams struct {
 // PostClusterEnrollJSONRequestBody defines body for PostClusterEnroll for application/json ContentType.
 type PostClusterEnrollJSONRequestBody = ClusterEnrollBody
 
+// PostClusterEvictJSONRequestBody defines body for PostClusterEvict for application/json ContentType.
+type PostClusterEvictJSONRequestBody = ClusterEvictBody
+
 // PostInstanceProgressJSONRequestBody defines body for PostInstanceProgress for application/json ContentType.
 type PostInstanceProgressJSONRequestBody = PostInstanceProgress
 
 // PostInstanceStatusJSONRequestBody defines body for PostInstanceStatus for application/json ContentType.
 type PostInstanceStatusJSONRequestBody = InstanceStatus
 
+// PostNetworkClaimJSONRequestBody defines body for PostNetworkClaim for application/json ContentType.
+type PostNetworkClaimJSONRequestBody = PostNetworkClaim
+
 // PostDaemonJoinJSONRequestBody defines body for PostDaemonJoin for application/json ContentType.
 type PostDaemonJoinJSONRequestBody = DaemonJoinBody
+
+// PostDaemonLeaveJSONRequestBody defines body for PostDaemonLeave for application/json ContentType.
+type PostDaemonLeaveJSONRequestBody = DaemonLeaveBody
 
 // PostDaemonLogControlJSONRequestBody defines body for PostDaemonLogControl for application/json ContentType.
 type PostDaemonLogControlJSONRequestBody = LogControlBody
 
 // PostNodeDRBDConfigJSONRequestBody defines body for PostNodeDRBDConfig for application/json ContentType.
 type PostNodeDRBDConfigJSONRequestBody = PostNodeDRBDConfigRequest
+
+// PostObjectActionResizeJSONRequestBody defines body for PostObjectActionResize for application/json ContentType.
+type PostObjectActionResizeJSONRequestBody = PostObjectActionResize
 
 // PostObjectActionRestartJSONRequestBody defines body for PostObjectActionRestart for application/json ContentType.
 type PostObjectActionRestartJSONRequestBody = PostObjectActionRestart
@@ -3399,6 +4124,9 @@ type PostObjectActionSwitchJSONRequestBody = PostObjectActionSwitch
 
 // PatchObjectDataJSONRequestBody defines body for PatchObjectData for application/json ContentType.
 type PatchObjectDataJSONRequestBody = PatchDataKeys
+
+// PostPoolClaimJSONRequestBody defines body for PostPoolClaim for application/json ContentType.
+type PostPoolClaimJSONRequestBody = PostPoolClaim
 
 // PostRelayMessageJSONRequestBody defines body for PostRelayMessage for application/json ContentType.
 type PostRelayMessageJSONRequestBody = PostRelayMessage

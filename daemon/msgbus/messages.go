@@ -159,6 +159,10 @@ var (
 
 		"InstanceMonitorAction": func() any { return &InstanceMonitorAction{} },
 
+		"InstanceStoppedFileRemoved": func() any { return &InstanceStoppedFileRemoved{} },
+
+		"InstanceStoppedFileUpdated": func() any { return &InstanceStoppedFileUpdated{} },
+
 		"InstanceMonitorDeleted": func() any { return &InstanceMonitorDeleted{} },
 
 		"InstanceMonitorUpdated": func() any { return &InstanceMonitorUpdated{} },
@@ -233,6 +237,9 @@ var (
 
 		"ObjectDeleted": func() any { return &ObjectDeleted{} },
 
+		"NodeOrchestrationAccepted":   func() any { return &NodeOrchestrationAccepted{} },
+		"NodeOrchestrationEnd":        func() any { return &NodeOrchestrationEnd{} },
+		"NodeOrchestrationRefused":    func() any { return &NodeOrchestrationRefused{} },
 		"ObjectOrchestrationAccepted": func() any { return &ObjectOrchestrationAccepted{} },
 
 		"ObjectOrchestrationEnd": func() any { return &ObjectOrchestrationEnd{} },
@@ -271,8 +278,8 @@ var (
 
 		"ZoneRecordUpdated": func() any { return &ZoneRecordUpdated{} },
 
-		"NetLinkDown": func() any { return &NetLinkDown{} },
-		"NetLinkUp":   func() any { return &NetLinkUp{} },
+		"NetLinkDown":      func() any { return &NetLinkDown{} },
+		"NetLinkUp":        func() any { return &NetLinkUp{} },
 		"NetIPAddrAdded":   func() any { return &NetIPAddrAdded{} },
 		"NetIPAddrDeleted": func() any { return &NetIPAddrDeleted{} },
 
@@ -439,10 +446,20 @@ type (
 		// Node is the nodename that will call exec
 		Node string `json:"node" yaml:"node"`
 		// Origin describes the exec caller: example: imon, nmon, scheduler...
-		Origin    string      `json:"origin" yaml:"origin"`
+		Origin string `json:"origin" yaml:"origin"`
+		// RID is the resource the exec is of, when it is of one.
+		RID string `json:"rid" yaml:"rid"`
+		// StartedAt is when the publisher started the process, measured by
+		// the publisher. A subscriber stamping its own arrival time instead
+		// would be recording when the bus delivered the news, which is not
+		// when the exec began and does not agree with its duration.
+		StartedAt time.Time   `json:"started_at" yaml:"started_at"`
 		Title     string      `json:"title" yaml:"title"`
-		SessionID xsession.Id `json:"session_id" yaml:"session_id"`
-		ExecID    xsession.Id `json:"exec_id" yaml:"exec_id"`
+		SessionID xsession.ID `json:"session_id" yaml:"session_id"`
+		ExecID    xsession.ID `json:"exec_id" yaml:"exec_id"`
+		// OrchestrationID is set when the exec is a step of an
+		// orchestration, so the execs of one can be found together.
+		OrchestrationID xsession.ID `json:"orchestration_id" yaml:"orchestration_id"`
 	}
 
 	// ExecFailed message describes failed exec call
@@ -451,13 +468,19 @@ type (
 		Command    string        `json:"command" yaml:"command"`
 		Duration   time.Duration `json:"duration" yaml:"duration"`
 		ErrS       string        `json:"error" yaml:"error"`
+		// ExitCode is what the process exited with, 128 + the signal number
+		// when a signal ended it, and -1 when it never ran at all.
+		ExitCode int `json:"exit_code" yaml:"exit_code"`
 		// Node is the nodename that called exec
 		Node string `json:"node" yaml:"node"`
 		// Origin describes the exec caller: example: imon, nmon, scheduler...
 		Origin    string      `json:"origin" yaml:"origin"`
 		Title     string      `json:"title" yaml:"title"`
-		SessionID xsession.Id `json:"session_id" yaml:"session_id"`
-		ExecID    xsession.Id `json:"exec_id" yaml:"exec_id"`
+		SessionID xsession.ID `json:"session_id" yaml:"session_id"`
+		ExecID    xsession.ID `json:"exec_id" yaml:"exec_id"`
+		// OrchestrationID is set when the exec is a step of an
+		// orchestration, so the sessions of one can be found together.
+		OrchestrationID xsession.ID `json:"orchestration_id" yaml:"orchestration_id"`
 	}
 
 	// ExecSuccess message describes successfully exec call
@@ -465,13 +488,19 @@ type (
 		pubsub.Msg `yaml:",inline"`
 		Command    string        `json:"command" yaml:"command"`
 		Duration   time.Duration `json:"duration" yaml:"duration"`
+		// ExitCode is what the process exited with. Usually zero, but a
+		// command given WithIgnoredExitCodes succeeds with others.
+		ExitCode int `json:"exit_code" yaml:"exit_code"`
 		// Node is the nodename that called exec
 		Node string `json:"node" yaml:"node"`
 		// Origin describes the exec caller: example: imon, nmon, scheduler...
 		Origin    string      `json:"origin" yaml:"origin"`
 		Title     string      `json:"title" yaml:"title"`
-		SessionID xsession.Id `json:"session_id" yaml:"session_id"`
-		ExecID    xsession.Id `json:"exec_id" yaml:"exec_id"`
+		SessionID xsession.ID `json:"session_id" yaml:"session_id"`
+		ExecID    xsession.ID `json:"exec_id" yaml:"exec_id"`
+		// OrchestrationID is set when the exec is a step of an
+		// orchestration, so the sessions of one can be found together.
+		OrchestrationID xsession.ID `json:"orchestration_id" yaml:"orchestration_id"`
 	}
 
 	Exit struct {
@@ -580,6 +609,24 @@ type (
 
 	// InstanceFrozenFileRemoved is emitted by a fs watcher or iman when an instance frozen file is removed.
 	InstanceFrozenFileRemoved struct {
+		pubsub.Msg `yaml:",inline"`
+		Path       naming.Path `json:"path" yaml:"path"`
+		File       string      `json:"file" yaml:"file"`
+		At         time.Time   `json:"at" yaml:"at"`
+	}
+
+	// InstanceStoppedFileUpdated is emitted by imon when the flag saying the
+	// instance was stopped on purpose is raised.
+	InstanceStoppedFileUpdated struct {
+		pubsub.Msg `yaml:",inline"`
+		Path       naming.Path `json:"path" yaml:"path"`
+		File       string      `json:"file" yaml:"file"`
+		At         time.Time   `json:"at" yaml:"at"`
+	}
+
+	// InstanceStoppedFileRemoved is emitted by imon when the flag saying the
+	// instance was stopped on purpose is lowered.
+	InstanceStoppedFileRemoved struct {
 		pubsub.Msg `yaml:",inline"`
 		Path       naming.Path `json:"path" yaml:"path"`
 		File       string      `json:"file" yaml:"file"`
@@ -858,6 +905,49 @@ type (
 		Node       string      `json:"node" yaml:"node"`
 	}
 
+	// NodeOrchestrationAccepted says the node monitor took an orchestration
+	// on, and under which id. It is the node's version of
+	// ObjectOrchestrationAccepted, and carries a node where that carries a
+	// path: a target state asked of the nodes is an orchestration of the same
+	// kind, run by nmon rather than imon.
+	NodeOrchestrationAccepted struct {
+		pubsub.Msg `yaml:",inline"`
+		ID         string `json:"id" yaml:"id"`
+		Node       string `json:"node" yaml:"node"`
+		// Expect is the state the orchestration is for. A node is asked to
+		// freeze by a global expect and to drain by a local one, so this is
+		// whichever of the two the request set.
+		Expect                string                   `json:"expect" yaml:"expect"`
+		GlobalExpect          node.MonitorGlobalExpect `json:"global_expect" yaml:"global_expect"`
+		GlobalExpectUpdatedAt time.Time                `json:"global_expect_updated_at" yaml:"global_expect_updated_at"`
+	}
+
+	NodeOrchestrationEnd struct {
+		pubsub.Msg            `yaml:",inline"`
+		ID                    string                   `json:"id" yaml:"id"`
+		Node                  string                   `json:"node" yaml:"node"`
+		Expect                string                   `json:"expect" yaml:"expect"`
+		GlobalExpect          node.MonitorGlobalExpect `json:"global_expect" yaml:"global_expect"`
+		GlobalExpectUpdatedAt time.Time                `json:"global_expect_updated_at" yaml:"global_expect_updated_at"`
+		Aborted               bool                     `json:"aborted" yaml:"aborted"`
+
+		// Failed says the orchestration gave up rather than reached what it
+		// was for, and Error says what it ended on. An orchestration ends
+		// either way, so the end is not the verdict by itself, and a client
+		// waiting on the id would otherwise have to read the states back and
+		// judge for itself.
+		Failed bool   `json:"failed" yaml:"failed"`
+		Error  string `json:"error,omitempty" yaml:"error,omitempty"`
+	}
+
+	NodeOrchestrationRefused struct {
+		pubsub.Msg   `yaml:",inline"`
+		ID           string                    `json:"id" yaml:"id"`
+		Node         string                    `json:"node" yaml:"node"`
+		Reason       string                    `json:"reason" yaml:"reason"`
+		GlobalExpect *node.MonitorGlobalExpect `json:"global_expect" yaml:"global_expect"`
+	}
+
 	ObjectOrchestrationAccepted struct {
 		pubsub.Msg            `yaml:",inline"`
 		ID                    string                       `json:"id" yaml:"id"`
@@ -875,6 +965,15 @@ type (
 		GlobalExpect          instance.MonitorGlobalExpect `json:"global_expect" yaml:"global_expect"`
 		GlobalExpectUpdatedAt time.Time                    `json:"global_expect_updated_at" yaml:"global_expect_updated_at"`
 		Aborted               bool                         `json:"aborted" yaml:"aborted"`
+
+		// Failed says the orchestration ended with instances that did not
+		// reach what it was for, and Error names them and the state they
+		// ended on. An orchestration ends when every node is done with it,
+		// whether it did what was asked or gave up, so the end is not the
+		// verdict by itself, and a client waiting on the id would otherwise
+		// have to read the instance states back and judge for itself.
+		Failed bool   `json:"failed" yaml:"failed"`
+		Error  string `json:"error,omitempty" yaml:"error,omitempty"`
 	}
 
 	ObjectOrchestrationRefused struct {
@@ -910,7 +1009,7 @@ type (
 		Path       naming.Path           `json:"path" yaml:"path"`
 		Node       string                `json:"node" yaml:"node"`
 		State      instance.MonitorState `json:"instance_monitor_state" yaml:"instance_monitor_state"`
-		SessionID  xsession.Id           `json:"session_id" yaml:"session_id"`
+		SessionID  xsession.ID           `json:"session_id" yaml:"session_id"`
 		IsPartial  bool                  `json:"is_partial" yaml:"is_partial"`
 	}
 
@@ -923,13 +1022,19 @@ type (
 
 	RemoteFileConfig struct {
 		pubsub.Msg `yaml:",inline"`
-		Path       naming.Path     `json:"path" yaml:"path"`
-		Node       string          `json:"node" yaml:"node"`
-		File       string          `json:"file" yaml:"file"`
-		Freeze     bool            `json:"freeze" yaml:"freeze"`
-		UpdatedAt  time.Time       `json:"updated_at" yaml:"updated_at"`
-		Ctx        context.Context `json:"-" yaml:"-"`
-		Err        chan error      `json:"-" yaml:"-"`
+		Path       naming.Path `json:"path" yaml:"path"`
+		Node       string      `json:"node" yaml:"node"`
+		File       string      `json:"file" yaml:"file"`
+
+		// MarkStopped asks that the instance the fetched configuration
+		// creates be flagged stopped on purpose, so the daemon does not
+		// start it as soon as the configuration lands, before the operator
+		// asked for anything.
+		MarkStopped bool `json:"mark_stopped" yaml:"mark_stopped"`
+
+		UpdatedAt time.Time       `json:"updated_at" yaml:"updated_at"`
+		Ctx       context.Context `json:"-" yaml:"-"`
+		Err       chan error      `json:"-" yaml:"-"`
 	}
 
 	// RunFileUpdated is emitted by the fs_watcher when it detects a
@@ -1282,6 +1387,14 @@ func (e *InstanceMonitorAction) Kind() string {
 	return "InstanceMonitorAction"
 }
 
+func (e *InstanceStoppedFileRemoved) Kind() string {
+	return "InstanceStoppedFileRemoved"
+}
+
+func (e *InstanceStoppedFileUpdated) Kind() string {
+	return "InstanceStoppedFileUpdated"
+}
+
 func (e *InstanceMonitorDeleted) Kind() string {
 	return "InstanceMonitorDeleted"
 }
@@ -1486,6 +1599,18 @@ func (e *ObjectCreated) Kind() string {
 
 func (e *ObjectDeleted) Kind() string {
 	return "ObjectDeleted"
+}
+
+func (e *NodeOrchestrationAccepted) Kind() string {
+	return "NodeOrchestrationAccepted"
+}
+
+func (e *NodeOrchestrationEnd) Kind() string {
+	return "NodeOrchestrationEnd"
+}
+
+func (e *NodeOrchestrationRefused) Kind() string {
+	return "NodeOrchestrationRefused"
 }
 
 func (e *ObjectOrchestrationAccepted) Kind() string {

@@ -18,6 +18,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"github.com/opensvc/om3/v3/core/client"
+	"github.com/opensvc/om3/v3/core/provisioned"
 	"github.com/opensvc/om3/v3/core/resource"
 	"github.com/opensvc/om3/v3/core/status"
 	"github.com/opensvc/om3/v3/daemon/api"
@@ -311,6 +312,11 @@ func (t XRDFQueryDG) PairState() string {
 
 func New() resource.Driver {
 	return &T{}
+}
+
+// Provisioned returns NotApplicable: this driver has nothing to provision.
+func (t *T) Provisioned(ctx context.Context) (provisioned.T, error) {
+	return provisioned.NotApplicable, nil
 }
 
 func (t *T) listPD(ctx context.Context) ([]string, error) {
@@ -608,12 +614,12 @@ func (t *T) postIngest(ctx context.Context) error {
 			continue
 		}
 		rid := t.RID()
-		sid := xsession.Sid().UUID()
-		params := api.PostInstanceActionSyncIngestParams{
+		sessionID := xsession.SessionID().UUID()
+		params := api.PostInstanceActionIngestParams{
 			Rid:       &rid,
-			SessionId: &sid,
+			SessionID: &sessionID,
 		}
-		resp, err := c.PostInstanceActionSyncIngestWithResponse(ctx, nodename, t.Path.Namespace, t.Path.Kind, t.Path.Name, &params)
+		resp, err := c.PostInstanceActionIngestWithResponse(ctx, nodename, t.Path.Namespace, t.Path.Kind, t.Path.Name, &params)
 		if err != nil {
 			errs = errors.Join(errs, fmt.Errorf("%s: %w", nodename, err))
 			continue

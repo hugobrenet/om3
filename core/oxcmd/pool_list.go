@@ -14,20 +14,22 @@ import (
 type (
 	CmdPoolList struct {
 		OptsGlobal
-		Name string
+		Name     string
+		Physical bool
 	}
 )
 
 func (t *CmdPoolList) Run() error {
 
-	render := func(items api.PoolItems) {
+	render := func(items api.PoolItems) error {
 		lines := make([]commoncmd.PoolLine, len(items))
 		for i, item := range items {
-			lines[i] = commoncmd.NewPoolLine(item)
+			lines[i] = commoncmd.NewPoolLine(item, t.Physical)
 		}
-		output.Renderer{
+		return output.Renderer{
 			DefaultOutput: "tab=NAME:name,TYPE:type,CAPABILITIES:capabilities[*],HEAD:head,VOLUME_COUNT:volume_count,BIN_SIZE:bin_size,BIN_USED:bin_used,BIN_FREE:bin_free",
 			Output:        t.Output,
+			Sort:          t.Sort,
 			Color:         t.Color,
 			Data:          lines,
 			Colorize:      rawconfig.Colorize,

@@ -77,6 +77,8 @@ func (t *Manager) orchestrate() {
 		return
 	}
 
+	t.clearStoppedFlagOnRequest()
+
 	t.orchestrateResourceRestart()
 	if t.isDone() {
 		t.log.Tracef("orchestrate return on isDone()")
@@ -98,6 +100,8 @@ func (t *Manager) orchestrate() {
 		t.orchestratePlacedAt()
 	case instance.MonitorGlobalExpectPurged:
 		t.orchestratePurged()
+	case instance.MonitorGlobalExpectResized:
+		t.orchestrateResized()
 	case instance.MonitorGlobalExpectRestarted:
 		t.orchestrateRestarted()
 	case instance.MonitorGlobalExpectStarted:
@@ -176,8 +180,10 @@ func (t *Manager) setWaitChildren() bool {
 func (t *Manager) endOrchestration() {
 	t.change = true
 
+	t.setOrchestrationVerdict()
 	defer t.publishOrchestrationEnded()
 
+	t.clearStateSpokenToPeers()
 	t.state.GlobalExpect = instance.MonitorGlobalExpectNone
 	t.state.GlobalExpectOptions = nil
 	t.state.OrchestrationIsDone = false
@@ -185,6 +191,50 @@ func (t *Manager) endOrchestration() {
 	t.clearPending()
 	t.updateIfChange()
 	t.logSetOrchestrationID(uuid.Nil)
+}
+
+// setOrchestrationVerdict says on the end of the orchestration whether it did
+// what it was for.
+//
+// An orchestration ends when every node is done with it, and a node is done
+// with it whether it reached what was asked or gave up on it. The states the
+// instances ended on are what tells the two apart, and the accepting node
+// holds them all, so the verdict is made here rather than left to every
+// client to make again from the states it can read.
+func (t *Manager) setOrchestrationVerdict() {
+	if t.orchestrationPending == nil {
+		return
+	}
+	failures := make([]string, 0)
+	for _, nodename := range t.scopeNodes {
+		instMon, ok := t.AllInstanceMonitors()[nodename]
+		if !ok {
+			continue
+		}
+		if instMon.State.IsOneOf(instance.MonitorStatesFailure...) {
+			failures = append(failures, fmt.Sprintf("%s on %s", instMon.State, nodename))
+		}
+	}
+	if len(failures) == 0 {
+		return
+	}
+	t.orchestrationPending.Failed = true
+	t.orchestrationPending.Error = strings.Join(failures, ", ")
+}
+
+// clearStateSpokenToPeers puts the instance back to idle when the state it
+// ends on was there to be read by the peers rather than by an operator.
+//
+// A resize walks a chain in stages, and a node that has finished says so in
+// its state, because a peer only grows a replicated link once every node has
+// grown what is under it. Every node is done by the time this runs, so there
+// is nobody left to tell, and an instance holding the size it was asked for
+// is not something to keep reporting: the size is in the status. A failure
+// stays, as the state of every failed action does.
+func (t *Manager) clearStateSpokenToPeers() {
+	if t.state.State == instance.MonitorStateResizeSuccess {
+		t.state.State = instance.MonitorStateIdle
+	}
 }
 
 // doneAndIdle marks the orchestration as done on the local instance and
@@ -262,4 +312,28 @@ func (t *Manager) orchestrationIsDoneOnPeers() bool {
 		t.waitConvergedOrchestrationMsg = make(map[string]string)
 	}
 	return true
+}
+
+// clearStoppedFlagOnRequest lowers the stopped flag when a user asked for the
+// object to be up.
+//
+// The flag is lowered on every instance in the scope, including the ones that
+// stay down, because the request is about the object: an instance left
+// flagged would not be a candidate the next time the object has to move.
+func (t *Manager) clearStoppedFlagOnRequest() {
+	switch t.state.GlobalExpect {
+	case instance.MonitorGlobalExpectStarted,
+		instance.MonitorGlobalExpectRestarted,
+		instance.MonitorGlobalExpectPlaced,
+		instance.MonitorGlobalExpectPlacedAt:
+	default:
+		return
+	}
+	if !t.isStopped() {
+		return
+	}
+	t.log.Infof("clear the stopped flag: the object is wanted up")
+	if err := t.unsetStopped(); err != nil {
+		t.log.Errorf("clear the stopped flag: %s", err)
+	}
 }

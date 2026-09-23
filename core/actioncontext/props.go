@@ -6,14 +6,23 @@ import (
 
 type (
 	Properties struct {
-		Name            string
-		Target          string
-		Progress        string
-		Failure         string
-		Order           ordering.T
-		MustLock        bool
-		LockGroup       string
-		Freeze          bool
+		Name      string
+		Target    string
+		Progress  string
+		Failure   string
+		Order     ordering.T
+		MustLock  bool
+		LockGroup string
+
+		// MarksStopped says the action leaves the instance stopped on
+		// purpose, so the daemon must not start it back on its own until
+		// the object is wanted up again.
+		MarksStopped bool
+
+		// ClearsStopped says the action wants the instance up, so the
+		// daemon may start it on its own again.
+		ClearsStopped bool
+
 		Rollback        bool
 		PG              bool
 		TimeoutKeywords []string
@@ -28,7 +37,7 @@ var (
 		Failure:         "boot failed",
 		MustLock:        true,
 		Order:           ordering.Desc,
-		Freeze:          true,
+		MarksStopped:    true,
 		TimeoutKeywords: []string{"timeout"},
 		PG:              true,
 	}
@@ -131,12 +140,18 @@ var (
 		MustLock: true,
 		PG:       true,
 	}
+	PGReset = Properties{
+		Name:     "pg_reset",
+		MustLock: true,
+		PG:       true,
+	}
 	Start = Properties{
 		Name:            "start",
 		Target:          "started",
 		Progress:        "starting",
 		Failure:         "start failed",
 		MustLock:        true,
+		ClearsStopped:   true,
 		Rollback:        true,
 		TimeoutKeywords: []string{"start_timeout", "timeout"},
 		PG:              true,
@@ -157,7 +172,7 @@ var (
 		Failure:         "stop failed",
 		MustLock:        true,
 		Order:           ordering.Desc,
-		Freeze:          true,
+		MarksStopped:    true,
 		TimeoutKeywords: []string{"stop_timeout", "timeout"},
 		PG:              true,
 	}

@@ -10,23 +10,25 @@ type CmdClusterUnfreeze struct {
 	OptsAsync
 	Color  string
 	Output string
+	Sort   string
 }
 
 func NewCmdClusterUnfreeze() *cobra.Command {
 	var options CmdClusterUnfreeze
 	cmd := &cobra.Command{
-		GroupID: GroupIDOrchestrated,
-		Use:     "unfreeze",
-		Hidden:  false,
-		Short:   "unblock ha automatic and split action start on all nodes",
+		Use:    "unfreeze",
+		Hidden: false,
+		Short:  "unblock ha automatic and split action start on all nodes",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return options.Run()
 		},
 	}
+	CmdOrchestrated(cmd)
 	flags := cmd.Flags()
 	FlagsAsync(flags, &options.OptsAsync)
 	FlagColor(flags, &options.Color)
 	FlagOutput(flags, &options.Output)
+	FlagSort(flags, &options.Sort)
 	return cmd
 }
 
@@ -37,6 +39,7 @@ func (t *CmdClusterUnfreeze) Run() error {
 		nodeaction.WithAsyncWait(t.Wait),
 		nodeaction.WithAsyncWatch(t.Watch),
 		nodeaction.WithFormat(t.Output),
+		nodeaction.WithSort(t.Sort),
 		nodeaction.WithColor(t.Color),
 		nodeaction.WithLocal(false),
 	).Do()

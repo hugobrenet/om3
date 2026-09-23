@@ -27,12 +27,15 @@ func (a *DaemonAPI) PostInstanceActionBoot(ctx echo.Context, nodename, namespace
 
 func (a *DaemonAPI) postLocalInstanceActionBoot(ctx echo.Context, namespace string, kind naming.Kind, name string, params api.PostInstanceActionBootParams) error {
 	log := LogHandler(ctx, "PostInstanceActionBoot")
-	var requesterSid uuid.UUID
+	var requesterSessionID uuid.UUID
 	p, err := naming.NewPath(namespace, kind, name)
 	if err != nil {
 		return JSONProblemf(ctx, http.StatusBadRequest, "Invalid parameters", "%s", err)
 	}
 	log = naming.LogWithPath(log, p)
+	if v, err := assertConfigUpdatedAt(ctx, p, params.ConfigUpdatedAt); !v {
+		return err
+	}
 	args := []string{p.String(), "instance", "boot"}
 	if params.To != nil && *params.To != "" {
 		args = append(args, "--to", *params.To)
@@ -55,12 +58,12 @@ func (a *DaemonAPI) postLocalInstanceActionBoot(ctx echo.Context, namespace stri
 	if params.Master != nil && *params.Master {
 		args = append(args, "--master")
 	}
-	if params.SessionId != nil {
-		requesterSid = *params.SessionId
+	if params.SessionID != nil {
+		requesterSessionID = *params.SessionID
 	}
-	if sid, err := a.apiExec(ctx, p, requesterSid, args, log); err != nil {
+	if sessionID, execID, err := a.apiExec(ctx, p, requesterSessionID, args, log); err != nil {
 		return JSONProblemf(ctx, http.StatusInternalServerError, "", "%s", err)
 	} else {
-		return ctx.JSON(http.StatusOK, api.InstanceActionAccepted{SessionID: sid})
+		return ctx.JSON(http.StatusOK, api.InstanceActionAccepted{SessionID: sessionID, ExecID: execID})
 	}
 }

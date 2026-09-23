@@ -54,6 +54,12 @@ OpenSVC v3 is a major evolution, rebuilt in Go for performance, reliability, and
 
 * **Enhanced secret management**: New commands like `om <kvstore> key rename` for better key management in secret stores.
 
+* **Act on the configuration you just wrote**: A configuration write answers with the timestamp the configuration now carries, in the `OM-Last-Modified` header of the `POST` and `PUT` on `/object/path/{namespace}/{kind}/{name}/config/file`, and every instance action accepts that timestamp as the `config_updated_at` parameter.
+
+    An instance whose configuration is older than the one named answers `409 Conflict`, saying which configuration it holds, rather than running the action on the configuration the write was replacing. A write is acknowledged by the node that received it and reaches the peer nodes a moment later, so a client that writes a configuration and immediately acts on the instances would otherwise race that propagation, silently, on every node but one.
+
+    The parameter is optional: an action asking for no configuration in particular runs on whatever the node holds, as before.
+
 ### Security
 
 * **SSRF protection for HTTP fetches**: 
@@ -82,6 +88,24 @@ OpenSVC v3 is a major evolution, rebuilt in Go for performance, reliability, and
 * **Network event handling**: New daemon network monitor (`netmon`) relays netlink events to pubsub, enabling faster response to network changes.
 
 * **New install keyword**: For fs and volume resources, the new `install` keyword enables deployment of complex file trees on start, with support for sec keys, cfg keys, local files or remote URIs, file/directory nesting, and user/group/permission setup.
+
+* **Namespace claims on cluster resources**: A namespace can be capped on what it takes of a resource its peers share, declared in its configuration as a `claim` section:
+
+    ```
+    [claim#1]
+    type = pool
+    name = tank
+    limit = 250m
+
+    [claim#2]
+    type = network
+    name = backend2
+    limit = 10
+    ```
+
+    A pool claim counts the size each volume of the namespace was created or resized with, and an allocation or a resize taking the namespace over its limit is refused. A network claim counts the addresses the namespace holds cluster-wide, and an allocation taking it over its limit is refused, while an address already held is never re-claimed, so an object at the limit still restarts.
+
+    A namespace declaring no claim on a resource is not capped on it, and the limit is read from the namespace configuration on the node doing the allocation, so the common case asks nothing of the daemon.
 
 ## Breaking Changes
 
@@ -163,10 +187,6 @@ OpenSVC v3 is a major evolution, rebuilt in Go for performance, reliability, and
     * `dequeue_actions.schedule`
 
 ### Object Configuration
-
-* **References**
-
-    * Drop support for arithmetic expressions in references
 
 * **Keywords renamed** (with backward compatibility)
 
@@ -758,6 +778,46 @@ Where the password is the value of the `þassword` key in `system/sec/relay-v3`.
 
 ### Orchestration
 
+* A start asked of a frozen object no longer unfreezes it.
+
+    In v2 and in earlier v3, `om <path> start` on a frozen instance removed the freeze and then started. The object ended up started and unfrozen, so a freeze an operator had set was discarded to serve the request.
+
+    It now starts the instance and leaves the freeze as it was found. Freezing means the daemon may not act by itself, which it still does not: a frozen instance is never started by the HA orchestration, and a frozen node is passed over when choosing where to start. What changes is only the start a user asked for, which is honoured rather than used as a reason to thaw.
+
+    Scripts that relied on `start` to clear a freeze must now ask for it: `om <path> unfreeze && om <path> start`. Note also that `om <path> start --wait` no longer waits for the object to be unfrozen, only for it to be up.
+
+* Freezing and unfreezing are now purely operator decisions. No orchestration sets or clears the frozen flag.
+
+    A stop used to freeze every instance of the object, which is how it kept the HA orchestration from starting it back. Creating an object froze it, a configuration fetched from a peer arrived frozen, and a provision unfroze. An operator could no longer tell their own freeze from one of those, and, since a start no longer thaws, an object that had been stopped and started again ran on with its failover and its resource restart silently disabled.
+
+    All of them now use a flag of their own: the instance is flagged **stopped on purpose**, which the daemon reads as "do not start this on my own initiative", and nothing else. `om <path> print status` shows it as `stopped`, `om mon` as a `=`, and the instance status carries it as `stopped_at`. It is a flag file in the instance var directory, like the frozen flag, so it survives a daemon restart and a reboot.
+
+    The flag is raised by `om <path> stop`, by `om <path> instance stop`, and when an object is created or its configuration lands on a node that had no instance of it. It is lowered by a start, a restart, a switch or a provision the user asks for — on every instance of the object, so the ones that stay down are still failover candidates — and by the instance being seen up again.
+
+    What does not change: `monitor_action = freezestop` still freezes, which is its point, and a node shutdown still freezes the node.
+
+    On upgrade, instances frozen by an older version's stop or create stay frozen, and nothing lifts those freezes any more. Run `om <selector> print status` to find them, and `om <path> unfreeze` on the ones you did not freeze yourself.
+
+* An orchestration says how it went, and is waited on by its id.
+
+    `ObjectOrchestrationEnd` and `NodeOrchestrationEnd` carry `failed` and `error`, and the orchestration table records them: an orchestration ends when every node is done with it, whether it did what was asked or gave up, so the end was not a verdict and every client had to read the states back and judge for itself. Any node answers, the one that accepted the orchestration from what it published and the others from the state each instance monitor drops the orchestration id with.
+
+    A request the monitor refuses no longer takes the id its requester was handed. Whether the id was taken on used to be decided by whether anything had changed the monitor in the same pass, which is not the same thing: a start asked right after a create, refused because the peer monitors were not known yet, left the monitor naming an orchestration that never ran, with no global expect to reach and so nothing to end it, and every later request on that object was refused as "already in progress" until an `om <path> abort` cleared it.
+
+    A node request that changes nothing, which is what an abort with nothing to abort is, is now refused with its reason rather than accepted silently: the id its requester was handed named an orchestration nobody would ever hear of, and a client waiting on it waited for the whole of its patience. The object monitor already answered this way.
+
+    `om daemon orchestration wait <id>`, `om daemon session wait <id>` and `om daemon exec wait <id>` wait for one to end and report how it went, exiting non-zero when it failed. The daemon holds the request until then — the `wait` query parameter of `GetDaemonOrchestration`, `GetDaemonExec` and `GetDaemonExecs` — and answers 408 when the wait expires with the work still running. One request is held for an hour at most, and a longer wait is that request asked again: what is waited for outlives it, so asking again resumes the wait rather than restarting it. A wait command asked for a duration that is not positive is refused. An orchestration is answered by any node, so a client that reached the cluster through a floating address follows one wherever the address now points.
+
+    `om <path> <action> --wait` and the node actions that wait (`om cluster freeze|unfreeze --wait`, `om node drain|abort --wait`) now wait this way instead of watching the event stream, the object actions for the event that ends the orchestration and the node ones for a node monitor state to go by. An end event missed is missed for good, which is what made a slow or reconnecting client wait for something that had already happened; the orchestration outlives the request in the daemon, which answers late askers with the same verdict. The per-action assertions the wait used to make on the object status are gone with it: they were a second description of what the daemon already knows, and they went stale twice, waiting for a freeze a stop no longer sets and for a thaw a provision no longer does.
+
+* `orchestrate = start` starts the object when its node comes up.
+
+    The value was documented but never implemented: the daemon only ever started an object on its own when `orchestrate = ha`, so an `orchestrate = start` object stayed down after a reboot, whatever it was running before.
+
+    It now starts the object on the first daemon start that follows a node boot, and moves it nowhere afterwards. A failover object is started if it does not already run elsewhere and the local node is the natural placement leader. A flex object is started if fewer than `flex_target` instances are up and the local node is one of the `flex_target` first natural placement leaders. Outside of that boot, nothing: an instance that goes down is not restarted, and `flex_target` is not chased.
+
+    The natural placement leader is asked, and not the leader among the instances that could start now, which is what the ha orchestration asks: handing the object to a peer because this node cannot take it is a failover, which is the half of `ha` that `orchestrate = start` does not want. A frozen node, a frozen instance and an instance flagged stopped on purpose are all left alone, so a stop asked before a reboot outlives it.
+
 * Flex
   * A `flex_target` value under `flex_min` is forced to `flex_min`. A warning is logged.
   * A `flex_target` value above `flex_max` is forced to `flex_max`. A warning is logged.
@@ -780,7 +840,7 @@ Where the password is the value of the `þassword` key in `system/sec/relay-v3`.
 
 * The `om node update ssh keys --node=...` command is deprecated in favor of `o[mx] cluster ssh trust` (configure the trust mesh on all cluster nodes) and `o[mx] node ssh trust` (trust the node's peers)
 
-* New `o[mx] cluster enroll --node <addr> --token-file <path>` command, moving a node from its cluster to another one
+* New `o[mx] cluster enroll --node <addr> --token <path>` command, moving a node from its cluster to another one
   without a shell on that node.
 
     The command is run against a node of the target cluster, and posts to the new `POST /cluster/enroll` endpoint. 
@@ -794,14 +854,40 @@ Where the password is the value of the `þassword` key in `system/sec/relay-v3`.
     is reported by the command instead of failing later inside the join running on the enrolled node. It defaults to a 
     name the certificate is valid for.
 
-    The command waits for the enrolled node heartbeat to beat in the target cluster, which is what proves the join
-    completed. Use `--wait=false` to return as soon as the node has accepted the order.
+    Use `--wait` to block until the enrolled node heartbeat beats in the target cluster, which is what proves the
+    join completed. Without it, the command returns as soon as the node has accepted the order.
     Beware, the node is drained: a single node cluster has nowhere to relocate its instances, so they are stopped, stay
     down, and removed from config.
 
+* New `o[mx] cluster evict --node <node>` command, removing a node from the cluster without a shell on that node.
+
+    The command is run against a node that stays, and posts to the new `POST /cluster/evict` endpoint. That node
+    orders the node to evict to leave, through the new `POST /node/name/{nodename}/daemon/action/leave` endpoint,
+    which forks a `om cluster leave` in the background.
+
+    The node to evict must be drained, and is refused with a 409 when it is not: nothing in the leave flow stops what
+    it still runs, so its instances would stay up on a node the cluster no longer knows about, free to start a second
+    time elsewhere. Drain it first with `om node drain --node <node> --wait`.
+
+    Evicting the node the command is posted to is refused: it would have to order itself to leave, and a leave needs a
+    peer to be removed by. Post to one of its peers instead.
+
+    The `--credential` names a file holding the `<username>:<password>` of a user to create on the evicted node once
+    it is alone. That node ends up with a cluster secret of its own, so no user, token or certificate of the cluster
+    it left reaches its api anymore: without this, the api is only reachable from a root shell on that node, through
+    the unix socket. The user is created in the `system` namespace, with the `root` grant.
+
+    Use `--wait` to block until the cluster nodes are updated. Beware, that only says the cluster dropped the node:
+    the daemon restart and the user creation happen afterwards, on a node this cluster no longer observes.
+
+* The `om cluster leave` command accepts `--credential <path>`, naming a file holding the `<username>:<password>` of a
+   user to create once the daemon has restarted alone, for the reason `o[mx] cluster evict` does. The
+   `OSVC_CREDENTIAL` environment variable is read when the option is not set. Without either, no user is created and
+   the node api stays reachable from a root shell only.
+
 * The `om cluster join` command accepts `--addr` to reach the `--node` at an explicit location, for a node that cannot
-   resolve the target nodename, and reads the token from the `OSVC_JOIN_TOKEN` environment variable when `--token` is
-   not set, so it never has to appear in the process table.
+   resolve the target nodename. Its `--token` names a file holding the token, and the `OSVC_JOIN_TOKEN` environment
+   variable is read when the option is not set, so the token never appears in the process table.
 
 ### Daemon
 
@@ -833,6 +919,34 @@ Where the password is the value of the `þassword` key in `system/sec/relay-v3`.
 
     om svc1 switch --live
     om svc1 takeover --live
+
+### Driver
+#### disk.sgcp_nfs_cg, fs.sgcp_nfs, ip.sgcp_dnsalias
+
+* New `OSVC_SGCP_CACHE` environment variable to override the sgcp api cache policy.
+
+    By default, the api results are served from a local cache to:
+
+    * the status evaluations run by the daemon scheduler, so the scheduler does not load the provider api.
+    * the status evaluations run by an action with a resource selection that neither includes the sgcp resource
+      nor requires it via a `<action>_requires` keyword of a selected resource, like `om foo app start`, as the
+      action does not depend on it. An action with `--to` is not a resource selection.
+
+    Every other action, an operator status, an action on or requiring the sgcp resource, or the status evaluation
+    of the sgcp resource object by an action on another object (e.g. the hard affinity checks of a start) first of
+    all, reads the api again.
+    The variable overrides this default whatever the action:
+
+    * `1`: serve the cached values, e.g. for tests or repeated manual status checks.
+    * `0`: never serve the cached values, the daemon scheduler included, e.g. to debug a stale status.
+
+    Any other value keeps the default policy, with a warning in the resource status.
+
+    A cached value is only served while younger than the `cache.ttl_seconds` value from the sgcp configuration
+    file, and a zero ttl disables the cache, whatever `OSVC_SGCP_CACHE` says.
+
+    Set it in `/etc/default/opensvc` or `/etc/sysconfig/opensvc` for the daemon, or in the environment of a single
+    command.
 
 ## Upgrade from b2.1
 

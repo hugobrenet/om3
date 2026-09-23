@@ -1076,6 +1076,7 @@ var (
 		Example:      "8",
 		Option:       "max_peers",
 		Provisioning: true,
+		Section:      "pool",
 		Text:         keywords.NewText(fs, "text/kw/node/pool.drbd.max_peers"),
 		Types:        []string{"drbd"},
 	}
@@ -1125,6 +1126,14 @@ var (
 		Section: "pool",
 		Text:    keywords.NewText(fs, "text/kw/node/pool.directory.path"),
 		Types:   []string{"directory"},
+	}
+	kwNodePoolDirectoryQuota = keywords.Keyword{
+		Converter: converters.Bool,
+		Default:   "false",
+		Option:    "quota",
+		Section:   "pool",
+		Text:      keywords.NewText(fs, "text/kw/node/pool.directory.quota"),
+		Types:     []string{"directory"},
 	}
 	kwNodePoolVirtualTemplate = keywords.Keyword{
 		Example:  "templates/vol/mpool-over-loop",
@@ -1866,6 +1875,7 @@ var (
 		&kwNodePoolZpoolPath,
 		&kwNodePoolSharePath,
 		&kwNodePoolDirectoryPath,
+		&kwNodePoolDirectoryQuota,
 		&kwNodePoolVirtualTemplate,
 		&kwNodePoolVirtualVolumeEnv,
 		&kwNodePoolVirtualOptionalVolumeEnv,

@@ -13,6 +13,7 @@ import (
 
 	"github.com/opensvc/om3/v3/core/actioncontext"
 	"github.com/opensvc/om3/v3/core/env"
+	"github.com/opensvc/om3/v3/core/provisioned"
 	"github.com/opensvc/om3/v3/core/rawconfig"
 	"github.com/opensvc/om3/v3/core/resource"
 	"github.com/opensvc/om3/v3/core/status"
@@ -292,6 +293,11 @@ func New() resource.Driver {
 	return &T{}
 }
 
+// Provisioned returns NotApplicable: this driver has nothing to provision.
+func (t *T) Provisioned(ctx context.Context) (provisioned.T, error) {
+	return provisioned.NotApplicable, nil
+}
+
 func (t *T) Configure() error {
 	cfg := sgcp.GetConfig()
 	if cfg == nil {
@@ -441,7 +447,11 @@ func (t *T) Status(ctx context.Context) status.T {
 		t.StatusLog().Info("xaas status disabled")
 		return status.NotApplicable
 	}
-	if sgcphelper.NeedsCacheClear() {
+	useCache, err := sgcphelper.UseCache(ctx, t)
+	if err != nil {
+		t.StatusLog().Warn("%s", err)
+	}
+	if !useCache {
 		if err := t.mgr.cacheClearGetCg(); err != nil {
 			t.Log().Debugf("clear get cg cache failed: %s", err)
 			t.StatusLog().Warn("possible stale value: clear get cg cache failed")

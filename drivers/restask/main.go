@@ -15,6 +15,7 @@ import (
 
 	"github.com/opensvc/om3/v3/core/actioncontext"
 	"github.com/opensvc/om3/v3/core/env"
+	"github.com/opensvc/om3/v3/core/provisioned"
 	"github.com/opensvc/om3/v3/core/resource"
 	"github.com/opensvc/om3/v3/core/status"
 	"github.com/opensvc/om3/v3/util/confirmation"
@@ -103,6 +104,11 @@ func (t *BaseTask) lastRunFile() string {
 
 func (t *BaseTask) lastRunRetcodeFile() string {
 	return filepath.Join(t.VarDir(), "last_run_retcode")
+}
+
+// Provisioned returns NotApplicable: a task has nothing to provision.
+func (t *BaseTask) Provisioned(ctx context.Context) (provisioned.T, error) {
+	return provisioned.NotApplicable, nil
 }
 
 func (t *BaseTask) StatusInfo(ctx context.Context) map[string]any {
@@ -217,7 +223,7 @@ func (t *BaseTask) WriteLastRun(retcode int) error {
 	lastRun := LastRun{
 		ExitCode:  retcode,
 		At:        time.Now(),
-		SessionID: xsession.Sid().UUID(),
+		SessionID: xsession.SessionID().UUID(),
 	}
 	b, err := json.Marshal(lastRun)
 	if err != nil {
@@ -261,7 +267,7 @@ func (t *BaseTask) RunIf(ctx context.Context, fn func(context.Context) error) er
 		if n >= t.MaxParallel {
 			return fmt.Errorf("task is already running %d times", n)
 		}
-		if err := runDir.Create([]byte(xsession.Sid().String())); err != nil {
+		if err := runDir.Create([]byte(xsession.SessionID().String())); err != nil {
 			return err
 		}
 		return nil

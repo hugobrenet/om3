@@ -1,7 +1,10 @@
 package driverdb_test
 
 import (
+	"fmt"
 	"os"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -121,4 +124,87 @@ func hasReference(s string) bool {
 		}
 	}
 	return false
+}
+
+// TestKeywordAttrExistsOnDriver verifies the Attr of every manifest attribute
+// of every registered driver names a field the driver struct really has.
+//
+// A keyword is bound to its field by name, resolved by reflection when the
+// configuration is loaded, so a keyword naming a field no longer there, or
+// never added, is only found when a configuration sets it, or even later when
+// a driver shares its keywords with a driver of another group and only one of
+// the two carries the field. The error then surfaced ("Specified field is not
+// present in the struct") aborts every action on the resource, so this is
+// checked here, once, for every driver.
+func TestKeywordAttrExistsOnDriver(t *testing.T) {
+	for _, drvID := range driver.List() {
+		factory := resource.NewResourceFunc(drvID)
+		if factory == nil {
+			// node drivers have no factory, and thus no manifest
+			continue
+		}
+		t.Run(drvID.String(), func(t *testing.T) {
+			r := factory()
+			for _, a := range manifest.Get(r).Attrs {
+				name := a.Name()
+				if name == "" {
+					continue
+				}
+				assert.NoErrorf(t, hasAttr(r, name), "%s: attr %q", drvID, name)
+			}
+		})
+	}
+}
+
+// hasAttr resolves a dotted manifest attribute path against the type of a
+// resource, the way keywords.Keyword.SetValue resolves it against its value.
+func hasAttr(r any, path string) error {
+	t := reflect.TypeOf(r)
+	for _, name := range strings.Split(path, ".") {
+		for t.Kind() == reflect.Ptr {
+			t = t.Elem()
+		}
+		if t.Kind() != reflect.Struct {
+			return fmt.Errorf("%s is not a struct", t)
+		}
+		field, ok := t.FieldByName(name)
+		if !ok {
+			return fmt.Errorf("%s has no %s field", t, name)
+		}
+		if field.PkgPath != "" {
+			return fmt.Errorf("%s.%s is unexported", t, name)
+		}
+		t = field.Type
+	}
+	return nil
+}
+
+// TestKeywordWithATypeNamesASection verifies no keyword names a driver type
+// without naming the section it belongs to.
+//
+// A keyword with no section belongs to every section there is, which is what
+// a keyword like "comment" wants. Pairing that with a type says the keyword
+// belongs to one driver of every section, and the documentation then invents
+// that driver in each of them: one keyword missing its section put an
+// "arbitrator.drbd", an "array.drbd" and twenty more into the node reference,
+// each advertising a configlet nothing accepts.
+func TestKeywordWithATypeNamesASection(t *testing.T) {
+	for name, store := range allKeywordStores(t) {
+		if strings.HasPrefix(name, "driver ") {
+			// The keywords of a driver manifest name no section: the section
+			// is the driver group, and is given to them where the manifest is
+			// folded into the store of a kind.
+			continue
+		}
+		t.Run(name, func(t *testing.T) {
+			require.NotEmpty(t, store)
+			for _, kw := range store {
+				if len(kw.Types) == 0 || kw.Section != "" {
+					continue
+				}
+				t.Errorf("%s: names the type %s and no section, so it is documented as a driver of every section",
+					kwID(kw), strings.Join(kw.Types, ", "))
+			}
+		})
+	}
 }

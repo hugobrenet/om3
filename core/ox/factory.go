@@ -292,13 +292,13 @@ func newCmdNetworkIPList() *cobra.Command {
 func newCmdNodeAbort() *cobra.Command {
 	var options commands.CmdNodeAbort
 	cmd := &cobra.Command{
-		GroupID: commoncmd.GroupIDOrchestrated,
-		Use:     "abort",
-		Short:   "abort the running orchestration",
+		Use:   "abort",
+		Short: "abort the running orchestration",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return options.Run()
 		},
 	}
+	commoncmd.CmdOrchestrated(cmd)
 	flags := cmd.Flags()
 	commoncmd.FlagsAsync(flags, &options.OptsAsync)
 	addFlagsGlobal(flags, &options.OptsGlobal)
@@ -318,7 +318,7 @@ func newCmdNodeCapabilitiesList() *cobra.Command {
 	}
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
-	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
+	commoncmd.FlagNodeSelectorOrAll(flags, &options.NodeSelector)
 	return cmd
 }
 
@@ -738,14 +738,14 @@ func newCmdNodeComplianceShowRuleset() *cobra.Command {
 func newCmdNodeDrain() *cobra.Command {
 	var options commands.CmdNodeDrain
 	cmd := &cobra.Command{
-		GroupID: commoncmd.GroupIDOrchestrated,
-		Use:     "drain",
-		Short:   "freeze node and shutdown all its object instances",
-		Long:    "If not specified with --node, the local node is selected for drain.",
+		Use:   "drain",
+		Short: "freeze node and shutdown all its object instances",
+		Long:  "If not specified with --node, the local node is selected for drain.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return options.Run()
 		},
 	}
+	commoncmd.CmdOrchestrated(cmd)
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
 	commoncmd.FlagsAsync(flags, &options.OptsAsync)
@@ -765,7 +765,7 @@ func newCmdNodeDrivers() *cobra.Command {
 	}
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
-	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
+	commoncmd.FlagNodeSelectorOrAll(flags, &options.NodeSelector)
 	return cmd
 }
 
@@ -780,7 +780,69 @@ func newCmdNodePing() *cobra.Command {
 	}
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
+	commoncmd.FlagNodeSelectorOrAll(flags, &options.NodeSelector)
+	return cmd
+}
+
+func newCmdDaemonOrchestrationWait() *cobra.Command {
+	var options commands.CmdDaemonOrchestrationList
+	cmd := &cobra.Command{
+		Use:   "wait ORCHESTRATION_ID",
+		Short: "wait for the end of an orchestration",
+		Long: `The daemon holds the request until the orchestration ends, and answers how it
+went, so this neither polls nor keeps an event stream open.
+
+Any node answers for any orchestration, because the instance monitors carrying
+its id reach every node, so this needs no node to be named, and a client that
+reached the cluster through a floating address follows an orchestration the
+address has since moved away from.
+
+An orchestration that has already ended is answered at once: the daemon
+remembers it for a while, which is what lets a client that lost its
+connection, or that asks late, still be told how it went.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			options.OrchestrationID = args[0]
+			if err := commoncmd.SetWait(cmd, &options.Wait, &options.Unbounded); err != nil {
+				return err
+			}
+			return options.RunWait()
+		},
+	}
+	commoncmd.CmdWithArg(cmd, `ORCHESTRATION_ID  The orchestration id the submitter of the action was handed.`)
+	flags := cmd.Flags()
+	addFlagsGlobal(flags, &options.OptsGlobal)
 	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
+	flags.DurationVar(&options.Wait, "duration", 0, "give up waiting after this duration")
+	return cmd
+}
+
+func newCmdDaemonOrchestrationList() *cobra.Command {
+	var options commands.CmdDaemonOrchestrationList
+	cmd := &cobra.Command{
+		Use:   "list [ORCHESTRATION_ID]",
+		Short: "list the orchestrations the monitor accepted, and is running",
+		Long: `Naming an orchestration id reports that one orchestration, and says so when
+the daemon no longer holds it, which is not the same answer as never having
+run it.
+
+Any node answers for any orchestration, so this needs no node to be named,
+which is what lets a client reaching the cluster through a floating address
+follow one.`,
+		Aliases: []string{"ls"},
+		Args:    cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				options.OrchestrationID = args[0]
+			}
+			return options.Run()
+		},
+	}
+	commoncmd.CmdWithArg(cmd, `ORCHESTRATION_ID  The orchestration id the submitter of the action was handed.`)
+	flags := cmd.Flags()
+	addFlagsGlobal(flags, &options.OptsGlobal)
+	commoncmd.FlagNodeSelectorOrLocalnode(flags, &options.NodeSelector)
+	flags.StringSliceVar(&options.States, "state", nil, "list the orchestrations in these states, every state when not set")
 	return cmd
 }
 
@@ -789,6 +851,7 @@ func newCmdNodeScheduleList() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "list",
 		Short:   "list the node scheduler entries",
+		Long:    `The entries listed are the ones of every node. Naming nodes lists theirs.`,
 		Aliases: []string{"ls"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return options.Run()
@@ -796,7 +859,7 @@ func newCmdNodeScheduleList() *cobra.Command {
 	}
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
-	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
+	commoncmd.FlagNodeSelectorOrAll(flags, &options.NodeSelector)
 	return cmd
 }
 
@@ -820,7 +883,7 @@ func newCmdNodeSystemDisk() *cobra.Command {
 	}
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
-	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
+	commoncmd.FlagNodeSelectorOrAll(flags, &options.NodeSelector)
 	return cmd
 }
 
@@ -835,7 +898,7 @@ func newCmdNodeSystemGroup() *cobra.Command {
 	}
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
-	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
+	commoncmd.FlagNodeSelectorOrAll(flags, &options.NodeSelector)
 	return cmd
 }
 
@@ -851,7 +914,7 @@ func newCmdNodeSystemHardware() *cobra.Command {
 	}
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
-	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
+	commoncmd.FlagNodeSelectorOrAll(flags, &options.NodeSelector)
 	return cmd
 }
 
@@ -867,7 +930,7 @@ func newCmdNodeSystemIPAddress() *cobra.Command {
 	}
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
-	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
+	commoncmd.FlagNodeSelectorOrAll(flags, &options.NodeSelector)
 	return cmd
 }
 
@@ -883,7 +946,7 @@ func newCmdNodeSystemPackage() *cobra.Command {
 	}
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
-	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
+	commoncmd.FlagNodeSelectorOrAll(flags, &options.NodeSelector)
 	return cmd
 }
 
@@ -899,7 +962,7 @@ func newCmdNodeSystemProperty() *cobra.Command {
 	}
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
-	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
+	commoncmd.FlagNodeSelectorOrAll(flags, &options.NodeSelector)
 	return cmd
 }
 
@@ -923,7 +986,7 @@ func newCmdNodeSystemSANPathInitiator() *cobra.Command {
 	}
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
-	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
+	commoncmd.FlagNodeSelectorOrAll(flags, &options.NodeSelector)
 	return cmd
 }
 
@@ -939,7 +1002,7 @@ func newCmdNodeSystemSANPath() *cobra.Command {
 	}
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
-	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
+	commoncmd.FlagNodeSelectorOrAll(flags, &options.NodeSelector)
 	return cmd
 }
 
@@ -955,7 +1018,7 @@ func newCmdNodeSystemUser() *cobra.Command {
 	}
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
-	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
+	commoncmd.FlagNodeSelectorOrAll(flags, &options.NodeSelector)
 	return cmd
 }
 
@@ -980,50 +1043,56 @@ func newCmdNodeConfigEdit() *cobra.Command {
 func newCmdNodeConfigEval() *cobra.Command {
 	var options commands.CmdNodeConfigGet
 	cmd := &cobra.Command{
-		Use:   "eval",
+		Use:   "eval [KEYWORD]...",
 		Short: "evaluate a configuration key value",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			commoncmd.SetKeywordsFromArgs(&options.Keywords, args)
 			options.Eval = true
 			return options.Run()
 		},
 	}
+	commoncmd.CmdWithArg(cmd, "KEYWORD  A configuration keyword, as [<section>.]<option>. Every keyword when none is named.")
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
 	commoncmd.FlagsLock(flags, &options.OptsLock)
 	commoncmd.FlagImpersonate(flags, &options.Impersonate)
 	commoncmd.FlagKeywords(flags, &options.Keywords)
-	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
+	commoncmd.FlagNodeSelectorOrAll(flags, &options.NodeSelector)
 	return cmd
 }
 
 func newCmdNodeConfigGet() *cobra.Command {
 	var options commands.CmdNodeConfigGet
 	cmd := &cobra.Command{
-		Use:   "get",
+		Use:   "get [KEYWORD]...",
 		Short: "get a configuration key value",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			commoncmd.SetKeywordsFromArgs(&options.Keywords, args)
 			return options.Run()
 		},
 	}
+	commoncmd.CmdWithArg(cmd, "KEYWORD  A configuration keyword, as [<section>.]<option>. Every keyword when none is named.")
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
 	commoncmd.FlagsLock(flags, &options.OptsLock)
 	commoncmd.FlagEval(flags, &options.Eval)
 	commoncmd.FlagImpersonate(flags, &options.Impersonate)
 	commoncmd.FlagKeywords(flags, &options.Keywords)
-	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
+	commoncmd.FlagNodeSelectorOrAll(flags, &options.NodeSelector)
 	return cmd
 }
 
 func newCmdNodeConfigShow() *cobra.Command {
 	var options commands.CmdNodeConfigShow
 	cmd := &cobra.Command{
-		Use:   "show",
+		Use:   "show [SECTION]...",
 		Short: "show the node configuration",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			commoncmd.SetSectionsFromArgs(&options.Sections, args)
 			return options.Run()
 		},
 	}
+	commoncmd.CmdWithArg(cmd, "SECTION  A configuration section, as DEFAULT or <driver group>#<index>. Every section when none is named.")
 	flags := cmd.Flags()
 	commoncmd.FlagSections(flags, &options.Sections)
 	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
@@ -1112,7 +1181,7 @@ func newCmdNodeLogs() *cobra.Command {
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
 	commoncmd.FlagsLogs(flags, &options.OptsLogs)
-	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
+	commoncmd.FlagNodeSelectorOrAll(flags, &options.NodeSelector)
 	return cmd
 }
 
@@ -1312,13 +1381,13 @@ func newCmdNodeUnfreeze() *cobra.Command {
 func newCmdObjectAbort(kind string) *cobra.Command {
 	var options commands.CmdObjectAbort
 	cmd := &cobra.Command{
-		GroupID: commoncmd.GroupIDOrchestrated,
-		Use:     "abort",
-		Short:   "abort the running orchestration",
+		Use:   "abort",
+		Short: "abort the running orchestration",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return options.Run(kind)
 		},
 	}
+	commoncmd.CmdOrchestrated(cmd)
 	flags := cmd.Flags()
 	commoncmd.FlagsAsync(flags, &options.OptsAsync)
 	addFlagsGlobal(flags, &options.OptsGlobal)
@@ -1493,13 +1562,15 @@ func newCmdObjectConfigEdit(kind string) *cobra.Command {
 func newCmdObjectConfigEval(kind string) *cobra.Command {
 	var options commands.CmdObjectConfigGet
 	cmd := &cobra.Command{
-		Use:   "eval",
+		Use:   "eval [KEYWORD]...",
 		Short: "evaluate a configuration key value",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			commoncmd.SetKeywordsFromArgs(&options.Keywords, args)
 			options.Eval = true
 			return options.Run(kind)
 		},
 	}
+	commoncmd.CmdWithArg(cmd, "KEYWORD  A configuration keyword, as [<section>.]<option>. Every keyword when none is named.")
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
 	commoncmd.FlagKeywords(flags, &options.Keywords)
@@ -1510,12 +1581,14 @@ func newCmdObjectConfigEval(kind string) *cobra.Command {
 func newCmdObjectConfigGet(kind string) *cobra.Command {
 	var options commands.CmdObjectConfigGet
 	cmd := &cobra.Command{
-		Use:   "get",
+		Use:   "get [KEYWORD]...",
 		Short: "get a configuration key value",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			commoncmd.SetKeywordsFromArgs(&options.Keywords, args)
 			return options.Run(kind)
 		},
 	}
+	commoncmd.CmdWithArg(cmd, "KEYWORD  A configuration keyword, as [<section>.]<option>. Every keyword when none is named.")
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
 	commoncmd.FlagEval(flags, &options.Eval)
@@ -1527,12 +1600,14 @@ func newCmdObjectConfigGet(kind string) *cobra.Command {
 func newCmdObjectConfigShow(kind string) *cobra.Command {
 	var options commands.CmdObjectConfigShow
 	cmd := &cobra.Command{
-		Use:   "show",
+		Use:   "show [SECTION]...",
 		Short: "show the object configuration",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			commoncmd.SetSectionsFromArgs(&options.Sections, args)
 			return options.Run(kind)
 		},
 	}
+	commoncmd.CmdWithArg(cmd, "SECTION  A configuration section, as DEFAULT or <driver group>#<index>. Every section when none is named.")
 	flags := cmd.Flags()
 	commoncmd.FlagObjectSelector(flags, &options.ObjectSelector)
 	commoncmd.FlagSections(flags, &options.Sections)
@@ -1552,6 +1627,41 @@ func newCmdObjectConfigUpdate(kind string) *cobra.Command {
 	commoncmd.FlagUpdateDelete(flags, &options.Delete)
 	commoncmd.FlagUpdateSet(flags, &options.Set)
 	commoncmd.FlagUpdateUnset(flags, &options.Unset)
+	return cmd
+}
+
+func newCmdObjectConfigMigrate(kind string) *cobra.Command {
+	var options commoncmd.CmdObjectConfigMigrate
+	cmd := &cobra.Command{
+		Use:   "migrate",
+		Short: "write the configuration in the shape om reads it in",
+		Long: `Write the configuration in the shape om reads it in.
+
+A configuration written for an older agent describes things this one no longer
+reads that way. What it asked for is still possible, in another shape, and
+this writes that shape: the configuration says the same thing afterwards, in
+words om reads. What changes is printed, and what no rule can write is printed
+with the reason.
+
+A filesystem that made the volume it mounts becomes a disk.lv resource and a
+filesystem resting on it. A size written as a share of a volume group becomes
+arithmetic on what om reports of that group, where the group is a resource of
+the object, and is kept as it is where it is not.
+
+The changes land as a configuration update, so they are weighed like any other
+write. The configuration as it was is kept under the backup directory of the
+node this runs on, and where it was kept is printed.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return options.Run(kind)
+		},
+	}
+	flags := cmd.Flags()
+	commoncmd.FlagColor(flags, &options.Color)
+	commoncmd.FlagOutput(flags, &options.Output)
+	commoncmd.FlagSort(flags, &options.Sort)
+	commoncmd.FlagObjectSelector(flags, &options.ObjectSelector)
+	commoncmd.FlagsLock(flags, &options.OptsLock)
+	commoncmd.FlagDryRun(flags, &options.DryRun)
 	return cmd
 }
 
@@ -2704,7 +2814,7 @@ func newCmdObjectSync(kind string) *cobra.Command {
 }
 
 func newCmdObjectGroupUpdate(kind, group string) *cobra.Command {
-	var options commands.CmdObjectInstanceSyncUpdate
+	var options commands.CmdObjectInstanceUpdate
 	cmd := &cobra.Command{
 		Use:   "update [PATTERN]...",
 		Short: "synchronize the copy of the local dataset on peers",
@@ -2721,11 +2831,12 @@ func newCmdObjectGroupUpdate(kind, group string) *cobra.Command {
 	commoncmd.FlagsLock(flags, &options.OptsLock)
 	commoncmd.FlagForce(flags, &options.Force)
 	commoncmd.FlagTarget(flags, &options.Target)
+	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
 	return cmd
 }
 
 func newCmdObjectGroupFull(kind, group string) *cobra.Command {
-	var options commands.CmdObjectInstanceSyncFull
+	var options commands.CmdObjectInstanceFull
 	cmd := &cobra.Command{
 		Use:   "full [PATTERN]...",
 		Short: "full copy of the local dataset on peers",
@@ -2742,11 +2853,12 @@ func newCmdObjectGroupFull(kind, group string) *cobra.Command {
 	commoncmd.FlagsLock(flags, &options.OptsLock)
 	commoncmd.FlagForce(flags, &options.Force)
 	commoncmd.FlagTarget(flags, &options.Target)
+	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
 	return cmd
 }
 
 func newCmdObjectGroupIngest(kind, group string) *cobra.Command {
-	var options commands.CmdObjectInstanceSyncIngest
+	var options commands.CmdObjectInstanceIngest
 	cmd := &cobra.Command{
 		Use:   "ingest [PATTERN]...",
 		Short: "ingest files received from the active instance",
@@ -2761,11 +2873,12 @@ func newCmdObjectGroupIngest(kind, group string) *cobra.Command {
 	addFlagsGlobal(flags, &options.OptsGlobal)
 	commoncmd.FlagsAsync(flags, &options.OptsAsync)
 	commoncmd.FlagsLock(flags, &options.OptsLock)
+	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
 	return cmd
 }
 
 func newCmdObjectGroupResync(kind, group string) *cobra.Command {
-	var options commands.CmdObjectInstanceSyncResync
+	var options commands.CmdObjectInstanceResync
 	cmd := &cobra.Command{
 		Use:   "resync [PATTERN]...",
 		Short: "restore optimal synchronization",
@@ -2781,11 +2894,12 @@ func newCmdObjectGroupResync(kind, group string) *cobra.Command {
 	commoncmd.FlagsAsync(flags, &options.OptsAsync)
 	commoncmd.FlagsLock(flags, &options.OptsLock)
 	commoncmd.FlagForce(flags, &options.Force)
+	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
 	return cmd
 }
 
 func newCmdObjectGroupSplit(kind, group string) *cobra.Command {
-	var options commands.CmdObjectInstanceSyncSplit
+	var options commands.CmdObjectInstanceSplit
 	cmd := &cobra.Command{
 		Use:   "split [PATTERN]...",
 		Short: "make both ends of a replicated pair read-write",
@@ -2801,6 +2915,7 @@ func newCmdObjectGroupSplit(kind, group string) *cobra.Command {
 	commoncmd.FlagsAsync(flags, &options.OptsAsync)
 	commoncmd.FlagsLock(flags, &options.OptsLock)
 	commoncmd.FlagForce(flags, &options.Force)
+	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
 	return cmd
 }
 
@@ -2830,7 +2945,6 @@ func newCmdObjectCreate(kind string) *cobra.Command {
 func newCmdObjectDelete(kind string) *cobra.Command {
 	var options commands.CmdObjectDelete
 	cmd := &cobra.Command{
-		GroupID: commoncmd.GroupIDOrchestrated,
 		Use:     "delete",
 		Aliases: []string{"del"},
 		Short:   "delete object configuration",
@@ -2843,6 +2957,7 @@ func newCmdObjectDelete(kind string) *cobra.Command {
 			return options.Run(kind)
 		},
 	}
+	commoncmd.CmdOrchestrated(cmd)
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
 	commoncmd.FlagsAsync(flags, &options.OptsAsync)
@@ -2854,14 +2969,14 @@ func newCmdObjectDelete(kind string) *cobra.Command {
 func newCmdObjectDeploy(kind string) *cobra.Command {
 	var options commands.CmdObjectCreate
 	cmd := &cobra.Command{
-		GroupID: commoncmd.GroupIDOrchestrated,
-		Use:     "deploy",
-		Short:   "create a new object and orchestrate provision",
+		Use:   "deploy",
+		Short: "create a new object and orchestrate provision",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			options.Provision = true
 			return options.Run(kind)
 		},
 	}
+	commoncmd.CmdOrchestrated(cmd)
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
 	commoncmd.FlagsAsync(flags, &options.OptsAsync)
@@ -2964,13 +3079,13 @@ func newCmdObjectContainerEnter(kind string) *cobra.Command {
 func newCmdObjectFreeze(kind string) *cobra.Command {
 	var options commands.CmdObjectFreeze
 	cmd := &cobra.Command{
-		GroupID: commoncmd.GroupIDOrchestrated,
-		Use:     "freeze",
-		Short:   "orchestrate block ha automatic start and monitor action",
+		Use:   "freeze",
+		Short: "orchestrate block ha automatic start and monitor action",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return options.Run(kind)
 		},
 	}
+	commoncmd.CmdOrchestrated(cmd)
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
 	commoncmd.FlagsAsync(flags, &options.OptsAsync)
@@ -2980,14 +3095,14 @@ func newCmdObjectFreeze(kind string) *cobra.Command {
 func newCmdObjectGiveback(kind string) *cobra.Command {
 	var options commands.CmdObjectGiveback
 	cmd := &cobra.Command{
-		GroupID: commoncmd.GroupIDOrchestrated,
-		Use:     "giveback",
-		Short:   "orchestrate to reach optimal placement",
-		Long:    "Stop the misplaced service instances and start on the preferred nodes.",
+		Use:   "giveback",
+		Short: "orchestrate to reach optimal placement",
+		Long:  "Stop the misplaced service instances and start on the preferred nodes.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return options.Run(kind)
 		},
 	}
+	commoncmd.CmdOrchestrated(cmd)
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
 	commoncmd.FlagsAsync(flags, &options.OptsAsync)
@@ -3322,6 +3437,32 @@ func newCmdObjectInstanceUnprovision(kind string) *cobra.Command {
 	return cmd
 }
 
+func newCmdObjectInstancePGReset(kind string) *cobra.Command {
+	var options commands.CmdObjectInstancePGReset
+	cmd := &cobra.Command{
+		Use:   "reset",
+		Short: "lift the instance process group cappings",
+		Long: `Put the process group cappings of the instance back where a node that never
+capped anything leaves them, whatever the pg_* keywords say and whoever wrote
+the capping being lifted.
+
+This is the way out of a capping the configuration does not know about: one
+left by an older agent, by systemd, or by hand. A capping the configuration
+does name comes back at the next "pg update", and at the next start. Lifting
+one for good is a pg_* keyword set to "default".`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return options.Run(kind)
+		},
+	}
+	flags := cmd.Flags()
+	addFlagsGlobal(flags, &options.OptsGlobal)
+	commoncmd.FlagsAsync(flags, &options.OptsAsync)
+	commoncmd.FlagsEncap(flags, &options.OptsEncap)
+	commoncmd.FlagsLock(flags, &options.OptsLock)
+	commoncmd.FlagsResourceSelector(cmd, &options.OptsResourceSelector)
+	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
+	return cmd
+}
 func newCmdObjectInstancePGUpdate(kind string) *cobra.Command {
 	var options commands.CmdObjectInstancePGUpdate
 	cmd := &cobra.Command{
@@ -3375,7 +3516,6 @@ func newCmdObjectInstanceStatus(kind string) *cobra.Command {
 func newCmdObjectProvision(kind string) *cobra.Command {
 	var options commands.CmdObjectProvision
 	cmd := &cobra.Command{
-		GroupID: commoncmd.GroupIDOrchestrated,
 		Use:     "provision",
 		Short:   "orchestrate provision",
 		Long:    "Allocate the system resources required by the object instance resources.\n\nFor example, provision a fs.ext3 resource means format the device with the mkfs.ext3 command.\n\nOperate on a selection of instances asynchronously using --node=<selector>.",
@@ -3384,6 +3524,7 @@ func newCmdObjectProvision(kind string) *cobra.Command {
 			return options.Run(kind)
 		},
 	}
+	commoncmd.CmdOrchestrated(cmd)
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
 	commoncmd.FlagsAsync(flags, &options.OptsAsync)
@@ -3437,29 +3578,67 @@ func newCmdObjectPRStop(kind string) *cobra.Command {
 func newCmdObjectPurge(kind string) *cobra.Command {
 	var options commands.CmdObjectPurge
 	cmd := &cobra.Command{
-		GroupID: commoncmd.GroupIDOrchestrated,
-		Use:     "purge",
-		Short:   "orchestrate unprovision and delete",
+		Use:   "purge",
+		Short: "orchestrate unprovision and delete",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return options.Run(kind)
 		},
 	}
+	commoncmd.CmdOrchestrated(cmd)
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
 	commoncmd.FlagsAsync(flags, &options.OptsAsync)
 	return cmd
 }
 
+func newCmdObjectResize(kind string) *cobra.Command {
+	var options commands.CmdObjectResize
+	cmd := &cobra.Command{
+		Use:   "resize SIZE",
+		Short: "grow the volume on every node holding an instance",
+		Long: `Grow the volume on every node holding an instance, to SIZE.
+
+SIZE is written to the volume configuration, which is the size every node
+converges to, and is what a listing like "ox pool volume ls" reports. It can
+be a size to reach, as "11g", "11GB" or "12Gi", or an amount to add, as "+1g".
+
+The work runs in two phases, because a replicated resource offers only what
+its smallest replica holds: every node first grows the links under the
+replicated one, and only then does the node holding the volume up grow the
+replicated link and the filesystem resting on it.
+
+A resize that fails is final on the instance it failed on. Nothing is retried,
+and asking again is how it is finished: the size already configured is the
+target, and every link that holds it is left alone.
+
+A resize only grows.`,
+		Args: cobra.RangeArgs(0, 1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if options.Size == "" && len(args) > 0 {
+				options.Size = args[0]
+			}
+			return options.Run(kind)
+		},
+	}
+	commoncmd.CmdOrchestrated(cmd)
+	commoncmd.CmdWithArg(cmd, "SIZE  The size to reach, or the amount to add.")
+	flags := cmd.Flags()
+	addFlagsGlobal(flags, &options.OptsGlobal)
+	commoncmd.FlagsAsync(flags, &options.OptsAsync)
+	flags.StringVar(&options.Size, "size", "", "the size to reach, or the amount to add (ex: 11g, +1g)")
+	return cmd
+}
+
 func newCmdObjectRestart(kind string) *cobra.Command {
 	var options commands.CmdObjectRestart
 	cmd := &cobra.Command{
-		GroupID: commoncmd.GroupIDOrchestrated,
-		Use:     "orchestrate restart",
-		Short:   "restart the selected objects, instances or resources",
+		Use:   "orchestrate restart",
+		Short: "restart the selected objects, instances or resources",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return options.Run(kind)
 		},
 	}
+	commoncmd.CmdOrchestrated(cmd)
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
 	commoncmd.FlagsAsync(flags, &options.OptsAsync)
@@ -3467,9 +3646,9 @@ func newCmdObjectRestart(kind string) *cobra.Command {
 }
 
 func newCmdObjectInstanceIngest(kind string) *cobra.Command {
-	var options commands.CmdObjectInstanceSyncIngest
+	var options commands.CmdObjectInstanceIngest
 	cmd := &cobra.Command{
-		Use:     "Ingest",
+		Use:     "ingest",
 		Short:   "ingest files received from the active instance",
 		Long:    "Resource drivers can send files from the active instance to the stand-by instances via the update action.",
 		GroupID: commoncmd.GroupIDReplication,
@@ -3482,11 +3661,12 @@ func newCmdObjectInstanceIngest(kind string) *cobra.Command {
 	commoncmd.FlagsAsync(flags, &options.OptsAsync)
 	commoncmd.FlagsLock(flags, &options.OptsLock)
 	commoncmd.FlagsResourceSelector(cmd, &options.OptsResourceSelector)
+	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
 	return cmd
 }
 
 func newCmdObjectInstanceFull(kind string) *cobra.Command {
-	var options commands.CmdObjectInstanceSyncFull
+	var options commands.CmdObjectInstanceFull
 	cmd := &cobra.Command{
 		Use:     "full",
 		Short:   "full copy of the local dataset on peers",
@@ -3503,11 +3683,12 @@ func newCmdObjectInstanceFull(kind string) *cobra.Command {
 	commoncmd.FlagsResourceSelector(cmd, &options.OptsResourceSelector)
 	commoncmd.FlagForce(flags, &options.Force)
 	commoncmd.FlagTarget(flags, &options.Target)
+	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
 	return cmd
 }
 
 func newCmdObjectInstanceResync(kind string) *cobra.Command {
-	var options commands.CmdObjectInstanceSyncResync
+	var options commands.CmdObjectInstanceResync
 	cmd := &cobra.Command{
 		Use:     "resync",
 		Short:   "restore optimal synchronization",
@@ -3523,11 +3704,12 @@ func newCmdObjectInstanceResync(kind string) *cobra.Command {
 	commoncmd.FlagsLock(flags, &options.OptsLock)
 	commoncmd.FlagsResourceSelector(cmd, &options.OptsResourceSelector)
 	commoncmd.FlagForce(flags, &options.Force)
+	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
 	return cmd
 }
 
 func newCmdObjectInstanceSplit(kind string) *cobra.Command {
-	var options commands.CmdObjectInstanceSyncSplit
+	var options commands.CmdObjectInstanceSplit
 	cmd := &cobra.Command{
 		Use:     "split",
 		Short:   "make both ends of a replicated pair read-write",
@@ -3543,11 +3725,12 @@ func newCmdObjectInstanceSplit(kind string) *cobra.Command {
 	commoncmd.FlagsLock(flags, &options.OptsLock)
 	commoncmd.FlagsResourceSelector(cmd, &options.OptsResourceSelector)
 	commoncmd.FlagForce(flags, &options.Force)
+	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
 	return cmd
 }
 
 func newCmdObjectInstanceUpdate(kind string) *cobra.Command {
-	var options commands.CmdObjectInstanceSyncUpdate
+	var options commands.CmdObjectInstanceUpdate
 	cmd := &cobra.Command{
 		Use:     "update",
 		Short:   "synchronize the copy of the local dataset on peers",
@@ -3564,6 +3747,7 @@ func newCmdObjectInstanceUpdate(kind string) *cobra.Command {
 	commoncmd.FlagsResourceSelector(cmd, &options.OptsResourceSelector)
 	commoncmd.FlagForce(flags, &options.Force)
 	commoncmd.FlagTarget(flags, &options.Target)
+	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
 	return cmd
 }
 
@@ -3602,13 +3786,15 @@ func newCmdObjectResourceList(kind string) *cobra.Command {
 func newCmdObjectInstanceRun(kind string) *cobra.Command {
 	var options commands.CmdObjectInstanceRun
 	cmd := &cobra.Command{
-		Use:   "run",
+		Use:   "run [PATTERN]...",
 		Short: "execute instance tasks",
 		Long:  "The svc and vol objects can define task resources. Tasks are usually run on a schedule, but this command can trigger a run now.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			commoncmd.SetRIDFromArgs(&options.RID, args, "task", "")
 			return options.Run(kind)
 		},
 	}
+	commoncmd.CmdWithArg(cmd, "PATTERN  A fnmatch task resource index filter. Every task when none is given.")
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
 	commoncmd.FlagsAsync(flags, &options.OptsAsync)
@@ -3689,18 +3875,19 @@ func newCmdObjectInstanceShutdown(kind string) *cobra.Command {
 func newCmdObjectStart(kind string) *cobra.Command {
 	var options commands.CmdObjectStart
 	cmd := &cobra.Command{
-		GroupID: commoncmd.GroupIDOrchestrated,
-		Use:     "start",
-		Short:   "orchestrate start",
-		Long:    "Request the daemon to orchestrate object start.\n\nUse the `instance start` command to start a specific instance.",
+		Use:   "start",
+		Short: "orchestrate start",
+		Long:  "Request the daemon to orchestrate object start.\n\nUse the `instance start` command to start a specific instance.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return options.Run(kind)
 		},
 	}
+	commoncmd.CmdOrchestrated(cmd)
 	flags := cmd.Flags()
 	commoncmd.FlagsAsync(flags, &options.OptsAsync)
 	commoncmd.FlagColor(flags, &options.OptsGlobal.Color)
 	commoncmd.FlagOutput(flags, &options.OptsGlobal.Output)
+	commoncmd.FlagSort(flags, &options.OptsGlobal.Sort)
 	commoncmd.FlagObjectSelector(flags, &options.OptsGlobal.ObjectSelector)
 	commoncmd.FlagIgnoreNotFound(flags, &options.IgnoreNotFound)
 	return cmd
@@ -3731,18 +3918,19 @@ func newCmdObjectInstanceStartStandby(kind string) *cobra.Command {
 func newCmdObjectStop(kind string) *cobra.Command {
 	var options commands.CmdObjectStop
 	cmd := &cobra.Command{
-		GroupID: commoncmd.GroupIDOrchestrated,
-		Use:     "stop",
-		Short:   "orchestrate stop",
-		Long:    "Request the daemon to orchestrate object stop.\n\nUse the `instance stop` command to stop a specific instance.",
+		Use:   "stop",
+		Short: "orchestrate stop",
+		Long:  "Request the daemon to orchestrate object stop.\n\nUse the `instance stop` command to stop a specific instance.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return options.Run(kind)
 		},
 	}
+	commoncmd.CmdOrchestrated(cmd)
 
 	flags := cmd.Flags()
 	commoncmd.FlagColor(flags, &options.OptsGlobal.Color)
 	commoncmd.FlagOutput(flags, &options.OptsGlobal.Output)
+	commoncmd.FlagSort(flags, &options.OptsGlobal.Sort)
 	commoncmd.FlagObjectSelector(flags, &options.OptsGlobal.ObjectSelector)
 	commoncmd.FlagIgnoreNotFound(flags, &options.IgnoreNotFound)
 	commoncmd.FlagsAsync(flags, &options.OptsAsync)
@@ -3752,14 +3940,14 @@ func newCmdObjectStop(kind string) *cobra.Command {
 func newCmdObjectSwitch(kind string) *cobra.Command {
 	var options commands.CmdObjectSwitch
 	cmd := &cobra.Command{
-		GroupID: commoncmd.GroupIDOrchestrated,
-		Use:     "switch",
-		Short:   "orchestrate a running instance move-out",
-		Long:    "Stop the running object instance and start on the next preferred node.",
+		Use:   "switch",
+		Short: "orchestrate a running instance move-out",
+		Long:  "Stop the running object instance and start on the next preferred node.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return options.Run(kind)
 		},
 	}
+	commoncmd.CmdOrchestrated(cmd)
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
 	commoncmd.FlagsAsync(flags, &options.OptsAsync)
@@ -3771,13 +3959,13 @@ func newCmdObjectSwitch(kind string) *cobra.Command {
 func newCmdObjectUnfreeze(kind string) *cobra.Command {
 	var options commands.CmdObjectUnfreeze
 	cmd := &cobra.Command{
-		GroupID: commoncmd.GroupIDOrchestrated,
-		Use:     "unfreeze",
-		Short:   "orchestrate unblock ha automatic start and monitor action",
+		Use:   "unfreeze",
+		Short: "orchestrate unblock ha automatic start and monitor action",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return options.Run(kind)
 		},
 	}
+	commoncmd.CmdOrchestrated(cmd)
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
 	commoncmd.FlagsAsync(flags, &options.OptsAsync)
@@ -3787,14 +3975,14 @@ func newCmdObjectUnfreeze(kind string) *cobra.Command {
 func newCmdObjectTakeover(kind string) *cobra.Command {
 	var options commands.CmdObjectTakeover
 	cmd := &cobra.Command{
-		GroupID: commoncmd.GroupIDOrchestrated,
-		Use:     "takeover",
-		Short:   "orchestrate a running instance move-in",
-		Long:    "Stop a object instance and start one on the local node.",
+		Use:   "takeover",
+		Short: "orchestrate a running instance move-in",
+		Long:  "Stop a object instance and start one on the local node.",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return options.Run(kind)
 		},
 	}
+	commoncmd.CmdOrchestrated(cmd)
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
 	commoncmd.FlagsAsync(flags, &options.OptsAsync)
@@ -3812,7 +4000,6 @@ func newCmdObjectThaw(kind string) *cobra.Command {
 func newCmdObjectUnprovision(kind string) *cobra.Command {
 	var options commands.CmdObjectUnprovision
 	cmd := &cobra.Command{
-		GroupID: commoncmd.GroupIDOrchestrated,
 		Use:     "unprovision",
 		Short:   "orchestrate free system resources (data-loss danger)",
 		Long:    "Free the system resources required by the object instances resources.",
@@ -3821,6 +4008,7 @@ func newCmdObjectUnprovision(kind string) *cobra.Command {
 			return options.Run(kind)
 		},
 	}
+	commoncmd.CmdOrchestrated(cmd)
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
 	commoncmd.FlagsAsync(flags, &options.OptsAsync)
@@ -3830,9 +4018,17 @@ func newCmdObjectUnprovision(kind string) *cobra.Command {
 func newCmdPoolList() *cobra.Command {
 	var options commoncmd.CmdPoolList
 	cmd := &cobra.Command{
-		Use:     "list",
-		Short:   "list the storage pools",
-		Long:    "If --node is set each pool will show one line per node, with the free/used/size being the pool usage on the node. Else, free/used/size are total values.",
+		Use:   "list",
+		Short: "list the storage pools",
+		Long: `List the storage pools.
+
+The sizes shown are what a pool can still hand out to volumes, which is the
+size a volume is asked for, the size a claim on the pool rations, and what
+"om pool volume ls" reports. A pool whose nodes each hold a copy of every
+volume hands out what the node with the least room can take, not the sum of
+what its nodes hold. Use --physical for the storage behind the pool.
+
+With --node, each pool shows one line per node, and the sizes are that node's.`,
 		Aliases: []string{"ls"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return options.Run()
@@ -3841,7 +4037,9 @@ func newCmdPoolList() *cobra.Command {
 	flags := cmd.Flags()
 	commoncmd.FlagColor(flags, &options.Color)
 	commoncmd.FlagOutput(flags, &options.Output)
+	commoncmd.FlagSort(flags, &options.Sort)
 	commoncmd.FlagPoolName(flags, &options.Name)
+	commoncmd.FlagPoolPhysical(flags, &options.Physical)
 	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
 	return cmd
 }
@@ -4522,6 +4720,7 @@ func NewCmdContextList() *cobra.Command {
 	flags := cmd.Flags()
 	commoncmd.FlagColor(flags, &options.Color)
 	commoncmd.FlagOutput(flags, &options.Output)
+	commoncmd.FlagSort(flags, &options.Sort)
 
 	return cmd
 }

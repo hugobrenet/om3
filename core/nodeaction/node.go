@@ -26,7 +26,6 @@ import (
 	"github.com/opensvc/om3/v3/daemon/msgbus"
 	"github.com/opensvc/om3/v3/util/funcopt"
 	"github.com/opensvc/om3/v3/util/hostname"
-	"github.com/opensvc/om3/v3/util/plog"
 	"github.com/opensvc/om3/v3/util/pubsub"
 	"github.com/opensvc/om3/v3/util/xsession"
 )
@@ -35,20 +34,35 @@ type (
 	// T has is an actionrouter.T with a node func
 	T struct {
 		actionrouter.T
-		AsyncWaitNode string
-		AsyncFunc     func(context.Context) error
-		LocalFunc     func() (any, error)
-		RemoteFunc    func(context.Context, string) (any, error)
+		// AsyncFunc submits the action and answers the orchestration it was
+		// accepted as, which is what a wait waits for.
+		AsyncFunc  func(context.Context) (uuid.UUID, error)
+		LocalFunc  func() (any, error)
+		RemoteFunc func(context.Context, string) (any, error)
 	}
 
-	Expectation any
+	// asyncResult is the answer to an orchestration request, in the shape an
+	// object orchestration request answers with.
+	asyncResult struct {
+		OrchestrationID uuid.UUID `json:"orchestration_id,omitempty"`
+		Status          string    `json:"status,omitempty"`
+	}
+
+	asyncResults []asyncResult
 )
+
+func (t asyncResult) Unstructured() map[string]any {
+	return map[string]any{
+		"orchestration_id": t.OrchestrationID.String(),
+		"status":           t.Status,
+	}
+}
 
 func New(opts ...funcopt.O) *T {
 	t := &T{}
 	_ = funcopt.Apply(t, opts...)
 	if t.NodeSelector != "" && t.DefaultOutput == "" {
-		t.DefaultOutput = "tab=NODE:nodename,SID:data.session_id"
+		t.DefaultOutput = "tab=NODE:nodename,SESSION_ID:data.session_id,EXEC_ID:data.exec_id"
 	}
 	return t
 }
@@ -63,16 +77,8 @@ func WithRemoteNodes(s string) funcopt.O {
 	})
 }
 
-func WithAsyncWaitNode(s string) funcopt.O {
-	return funcopt.F(func(i any) error {
-		t := i.(*T)
-		t.AsyncWaitNode = s
-		return nil
-	})
-}
-
 // WithAsyncFunc sets a function to run if the action is async
-func WithAsyncFunc(f func(context.Context) error) funcopt.O {
+func WithAsyncFunc(f func(context.Context) (uuid.UUID, error)) funcopt.O {
 	return funcopt.F(func(i any) error {
 		t := i.(*T)
 		t.AsyncFunc = f
@@ -162,6 +168,18 @@ func WithFormat(s string) funcopt.O {
 	})
 }
 
+// WithSort sets the order of the result table.
+//
+// An action reaching several nodes answers a row per run, and they arrive in
+// whatever order the nodes answered in.
+func WithSort(s string) funcopt.O {
+	return funcopt.F(func(i any) error {
+		t := i.(*T)
+		t.Sort = s
+		return nil
+	})
+}
+
 // WithColor activates the colorization of outputs
 // auto => yes if os.Stdout is a tty
 // yes
@@ -225,25 +243,29 @@ func (t T) DoLocal() error {
 	if result.Error != nil {
 		return result.Error
 	}
-	output.Renderer{
+	return output.Renderer{
 		Output:        t.Output,
+		Sort:          t.Sort,
 		Color:         t.Color,
 		Data:          []actionrouter.Result{result},
 		Colorize:      rawconfig.Colorize,
 		HumanRenderer: func() string { return human(result) },
 	}.Print()
-	return nil
 }
 
 // DoAsync uses the agent API to submit a target state to reach via an
 // orchestration.
 func (t T) DoAsync() error {
 	var (
-		ctx         context.Context
-		cancel      context.CancelFunc
-		expectation any
-		waitC       = make(chan error)
-		b           []byte
+		ctx    context.Context
+		cancel context.CancelFunc
+		b      []byte
+
+		// orchestrationID is what the daemon accepted the action as, and
+		// what a wait waits for.
+		orchestrationID uuid.UUID
+
+		orchestrationQueued api.OrchestrationQueued
 	)
 	c, err := client.New(client.WithTimeout(0))
 	if err != nil {
@@ -256,29 +278,15 @@ func (t T) DoAsync() error {
 		ctx, cancel = context.WithCancel(context.Background())
 		defer cancel()
 	}
-	if t.Wait {
-		switch t.Target {
-		case node.MonitorStateDrainSuccess.String():
-			expectation = node.MonitorStateDrainSuccess
-		case node.MonitorGlobalExpectAborted.String():
-			expectation = node.MonitorGlobalExpectAborted
-		case node.MonitorGlobalExpectFrozen.String():
-			expectation = node.MonitorGlobalExpectFrozen
-		case node.MonitorGlobalExpectUnfrozen.String():
-			expectation = node.MonitorGlobalExpectUnfrozen
-		default:
-			return fmt.Errorf("unexpected target: %s", t.Target)
-		}
-		t.waitExpectation(ctx, c, expectation, waitC)
-	}
 	if t.AsyncFunc != nil {
-		if err := t.AsyncFunc(ctx); err != nil {
-			return err
+		if id, e := t.AsyncFunc(ctx); e != nil {
+			return e
+		} else {
+			orchestrationID = id
 		}
 	} else {
 		switch t.Target {
 		case node.MonitorGlobalExpectAborted.String():
-			expectation = node.MonitorGlobalExpectAborted
 			if resp, e := c.PostClusterActionAbortWithResponse(ctx); e != nil {
 				err = e
 			} else {
@@ -300,7 +308,6 @@ func (t T) DoAsync() error {
 				}
 			}
 		case node.MonitorGlobalExpectFrozen.String():
-			expectation = node.MonitorGlobalExpectFrozen
 			if resp, e := c.PostClusterActionFreezeWithResponse(ctx); e != nil {
 				err = e
 			} else {
@@ -322,7 +329,6 @@ func (t T) DoAsync() error {
 				}
 			}
 		case node.MonitorGlobalExpectUnfrozen.String():
-			expectation = node.MonitorGlobalExpectUnfrozen
 			if resp, e := c.PostClusterActionUnfreezeWithResponse(ctx); e != nil {
 				err = e
 			} else {
@@ -347,23 +353,34 @@ func (t T) DoAsync() error {
 			return fmt.Errorf("unexpected target: %s", t.Target)
 		}
 
-		if err == nil {
-			var orchestrationQueued api.OrchestrationQueued
-			if err := json.Unmarshal(b, &orchestrationQueued); err == nil {
-				fmt.Println(orchestrationQueued.OrchestrationID)
-			} else {
-				fmt.Fprintln(os.Stderr, err)
-			}
+		// The same answer an object orchestration request gives: the id under
+		// a header saying what it is, and whether the request was taken. A
+		// bare id on stdout said neither, and skipped the renderer, so the
+		// --output the command advertises did nothing.
+		var result asyncResult
+		if err != nil {
+			result.Status = err.Error()
+			err = errors.New("orchestration rejected")
+		} else if e := json.Unmarshal(b, &orchestrationQueued); e != nil {
+			result.Status = e.Error()
+			err = errors.New("orchestration rejected")
+		} else {
+			orchestrationID = orchestrationQueued.OrchestrationID
+			result.OrchestrationID = orchestrationID
+			result.Status = "accepted"
 		}
+		err = errors.Join(err, output.Renderer{
+			DefaultOutput: "tab=ORCHESTRATION_ID:orchestration_id,STATUS:status",
+			Output:        t.Output,
+			Sort:          t.Sort,
+			Color:         t.Color,
+			Data:          asyncResults{result},
+			Colorize:      rawconfig.Colorize,
+		}.Print())
 	}
 
-	if t.Wait {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case err := <-waitC:
-			return err
-		}
+	if t.Wait && err == nil {
+		return actionrouter.WaitOrchestration(ctx, c, orchestrationID)
 	}
 
 	return err
@@ -386,7 +403,7 @@ func (t T) DoRemote() error {
 	count := len(nodenames)
 	done := 0
 	todo := 0
-	requesterSid := xsession.Sid().UUID()
+	requesterSessionID := xsession.SessionID().UUID()
 
 	var (
 		cancel context.CancelFunc
@@ -410,7 +427,7 @@ func (t T) DoRemote() error {
 
 	for _, nodename := range nodenames {
 		if t.Wait {
-			t.waitRequesterSessionEnd(ctx, c, nodename, requesterSid, waitC)
+			t.waitRequesterSessionEnd(ctx, c, nodename, requesterSessionID, waitC)
 		}
 		if t.RemoteFunc == nil {
 			return fmt.Errorf("RemoteFunc is nil")
@@ -439,13 +456,14 @@ func (t T) DoRemote() error {
 			break
 		}
 	}
-	output.Renderer{
+	errs = errors.Join(errs, output.Renderer{
 		DefaultOutput: t.DefaultOutput,
 		Output:        t.Output,
+		Sort:          t.Sort,
 		Color:         t.Color,
 		Data:          results,
 		Colorize:      rawconfig.Colorize,
-	}.Print()
+	}.Print())
 	if t.Wait && todo > 0 {
 		for i := 0; i < todo; i++ {
 			select {
@@ -462,7 +480,7 @@ func (t T) DoRemote() error {
 	return errs
 }
 
-func (t T) waitRequesterSessionEnd(ctx context.Context, c *client.T, nodename string, requesterSid uuid.UUID, errC chan<- error) {
+func (t T) waitRequesterSessionEnd(ctx context.Context, c *client.T, nodename string, requesterSessionID uuid.UUID, errC chan<- error) {
 	var (
 		filters []string
 		msg     pubsub.Messager
@@ -472,8 +490,8 @@ func (t T) waitRequesterSessionEnd(ctx context.Context, c *client.T, nodename st
 	)
 	filters = []string{
 		fmt.Sprintf("NodeMonitorDeleted"),
-		fmt.Sprintf("ExecFailed,.session_id=%s", requesterSid),
-		fmt.Sprintf("ExecSuccess,.session_id=%s", requesterSid),
+		fmt.Sprintf("ExecFailed,.session_id=%s", requesterSessionID),
+		fmt.Sprintf("ExecSuccess,.session_id=%s", requesterSessionID),
 	}
 	getEvents := c.NewGetEvents().SetFilters(filters)
 	if t.WaitDuration > 0 {
@@ -526,96 +544,6 @@ func (t T) waitRequesterSessionEnd(ctx context.Context, c *client.T, nodename st
 
 func (t T) Do() error {
 	return actionrouter.Do(t)
-}
-
-// waitExpectation subscribes to NodeMonitorUpdated and wait for expectation reached
-// It writes result to errC channel
-func (t T) waitExpectation(ctx context.Context, c *client.T, exp Expectation, errC chan<- error) {
-	var (
-		filters      []string
-		msg          msgbus.NodeMonitorUpdated
-		reached      = make(map[string]bool)
-		reachedUnset = make(map[string]bool)
-
-		err      error
-		evReader event.ReadCloser
-	)
-	log := plog.NewDefaultLogger().WithPrefix(fmt.Sprintf("nodeaction: wait %s: ", exp))
-	switch exp.(type) {
-	case node.MonitorState:
-		filters = []string{"NodeMonitorUpdated,node=" + t.AsyncWaitNode}
-	case node.MonitorGlobalExpect:
-		filters = []string{"NodeMonitorUpdated"}
-	}
-	log.Tracef("get event with filters: %+v", filters)
-	getEvents := c.NewGetEvents().SetFilters(filters)
-	if t.WaitDuration > 0 {
-		getEvents = getEvents.SetDuration(t.WaitDuration)
-	}
-	evReader, err = getEvents.GetReader(ctx)
-	if err != nil {
-		errC <- err
-		return
-	}
-
-	go func() {
-		defer func() {
-			_ = evReader.Close()
-			if err != nil {
-				err = fmt.Errorf("wait expectation %s failed: %w", exp, err)
-			}
-			select {
-			case <-ctx.Done():
-			case errC <- err:
-			}
-		}()
-
-		for {
-			ev, readError := evReader.Read()
-			if readError != nil {
-				if errors.Is(readError, io.EOF) {
-					err = fmt.Errorf("no more events (%w), wait %v failed", err, exp)
-				} else {
-					err = readError
-				}
-				return
-			}
-			switch ev.Kind {
-			case "NodeMonitorUpdated":
-				err = json.Unmarshal(ev.Data, &msg)
-				if err != nil {
-					return
-				}
-				log.Tracef("NodeMonitorUpdated %+v", msg)
-				nmon := msg.Value
-				switch v := exp.(type) {
-				case node.MonitorState:
-					if nmon.State == v {
-						reached[msg.Node] = true
-						log.Tracef("NodeMonitorUpdated reached state %s", v)
-					} else if v == node.MonitorStateDrainSuccess && nmon.State == node.MonitorStateDrainFailure {
-						err = fmt.Errorf("drain failed")
-						return
-					} else if reached[msg.Node] && nmon.State == node.MonitorStateIdle {
-						log.Tracef("NodeMonitorUpdated reached state %s unset", v)
-						return
-					}
-				case node.MonitorGlobalExpect:
-					if nmon.GlobalExpect == v {
-						reached[msg.Node] = true
-						log.Tracef("NodeMonitorUpdated reached global expect %s", v)
-					} else if reached[msg.Node] && nmon.GlobalExpect == node.MonitorGlobalExpectNone {
-						reachedUnset[msg.Node] = true
-						log.Tracef("NodeMonitorUpdated reached global expect %s unset for %s", v, msg.Node)
-					}
-					if len(reached) > 0 && len(reached) == len(reachedUnset) {
-						log.Tracef("NodeMonitorUpdated reached global expect %s unset for all nodes", v)
-						return
-					}
-				}
-			}
-		}
-	}()
 }
 
 func (t T) nodeDo(ctx context.Context, resultQ chan actionrouter.Result, nodename string, fn func(context.Context, string) (any, error)) {

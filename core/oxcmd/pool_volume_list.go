@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/opensvc/om3/v3/core/client"
+	"github.com/opensvc/om3/v3/core/commoncmd"
 	"github.com/opensvc/om3/v3/core/output"
 	"github.com/opensvc/om3/v3/core/rawconfig"
 	"github.com/opensvc/om3/v3/daemon/api"
@@ -32,14 +33,18 @@ func (t *CmdPoolVolumeList) Run() error {
 	}
 	switch resp.StatusCode() {
 	case 200:
-		output.Renderer{
-			DefaultOutput: "tab=POOL:pool,PATH:path,SIZE:size,CHILDREN:children[*],IS_ORPHAN:is_orphan",
+		lines := make([]commoncmd.PoolVolumeLine, len(resp.JSON200.Items))
+		for i, item := range resp.JSON200.Items {
+			lines[i] = commoncmd.NewPoolVolumeLine(item)
+		}
+		return output.Renderer{
+			DefaultOutput: "tab=POOL:pool,PATH:path,SIZE:size,CHARGES:charges_text,CHILDREN:children[*],IS_ORPHAN:is_orphan",
 			Output:        t.Output,
+			Sort:          t.Sort,
 			Color:         t.Color,
-			Data:          resp.JSON200,
+			Data:          lines,
 			Colorize:      rawconfig.Colorize,
 		}.Print()
-		return nil
 	case 401:
 		return fmt.Errorf("%s", resp.JSON401)
 	case 403:

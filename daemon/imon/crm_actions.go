@@ -1,10 +1,13 @@
 package imon
 
 import (
+	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/opensvc/om3/v3/daemon/proc"
 
 	"github.com/opensvc/om3/v3/core/env"
@@ -12,9 +15,11 @@ import (
 	"github.com/opensvc/om3/v3/core/priority"
 	"github.com/opensvc/om3/v3/core/provisioned"
 	"github.com/opensvc/om3/v3/core/status"
+	"github.com/opensvc/om3/v3/core/xerrors"
 	"github.com/opensvc/om3/v3/daemon/msgbus"
 	"github.com/opensvc/om3/v3/daemon/runner"
 	"github.com/opensvc/om3/v3/util/command"
+	"github.com/opensvc/om3/v3/util/funcopt"
 	"github.com/opensvc/om3/v3/util/pubsub"
 	"github.com/opensvc/om3/v3/util/xsession"
 )
@@ -157,12 +162,35 @@ func (t *Manager) crmResourceIngest(rids []string) error {
 
 func (t *Manager) crmResourceStartStandby(rids []string) error {
 	s := strings.Join(rids, ",")
-	return t.crmAction("start", t.path.String(), "instance", "startstandby", "--rid", s)
+	return t.crmMaintenanceAction("start", t.path.String(), "instance", "startstandby", "--rid", s)
 }
 
 func (t *Manager) crmResourceStart(rids []string) error {
 	s := strings.Join(rids, ",")
-	return t.crmAction("start", t.path.String(), "instance", "start", "--rid", s)
+	return t.crmMaintenanceAction("start", t.path.String(), "instance", "start", "--rid", s)
+}
+
+// crmResizeStage grows one stage of the chain, and answers the exit code it
+// grew it with.
+//
+// A node that does not hold the object up asks for the stages below the one
+// holding the head, and is told there is no stage of that number to run here
+// when it reaches it. That is how it learns it is done, the number of stages
+// being read from the chain and known only to the node walking it.
+//
+// That answer is asked for, so it is not a failure: the exec is not reported
+// failed, and the exit code is not logged as an error. It comes back as the
+// exit code instead, which is what tells it from a stage that grew.
+func (t *Manager) crmResizeStage(stage int) (int, error) {
+	title := fmt.Sprintf("resize stage %d", stage)
+	args := []string{t.path.String(), "instance", "resize", "--stage", strconv.Itoa(stage)}
+	if !t.isResizeLeader() {
+		args = append(args, "--skip-head-stage")
+	}
+	if testCRMAction != nil {
+		return 0, testCRMAction(title, args...)
+	}
+	return t.crmDefaultAction(t.state.OrchestrationID, title, []int{xerrors.ExitCodeResizeNoSuchStage}, args...)
 }
 
 func (t *Manager) crmShutdown() error {
@@ -207,90 +235,138 @@ func (t *Manager) crmUnprovisionLeader() error {
 	return t.crmAction("unprovision leader", t.path.String(), "instance", "unprovision", "--leader")
 }
 
+// crmAction forks a crm command as a step of the orchestration the monitor is
+// running, when it is running one.
 func (t *Manager) crmAction(title string, cmdArgs ...string) error {
 	if testCRMAction != nil {
 		return testCRMAction(title, cmdArgs...)
 	}
-	return t.crmDefaultAction(title, cmdArgs...)
+	_, err := t.crmDefaultAction(t.state.OrchestrationID, title, nil, cmdArgs...)
+	return err
 }
 
-func (t *Manager) crmDefaultAction(title string, cmdArgs ...string) error {
-	sid := xsession.NewSid()
-	eid := xsession.NewEid()
-	oid := xsession.NewOid(t.state.OrchestrationID)
-	cmd := command.New(
+// crmMaintenanceAction forks a crm command the monitor decided on by itself,
+// which is a step of no orchestration even while one is running.
+//
+// Restarting a resource is the monitor holding the local expect it was already
+// given, not a target state anyone asked for: there is no requester, no id
+// handed out and no end to converge on. The monitor can only restart while the
+// instance is idle or has failed to start or stop, and an orchestration is in
+// flight on every node of the object throughout - including the nodes it asks
+// nothing of - so reading the id off the state would tag a restart with an
+// orchestration it had no part in.
+func (t *Manager) crmMaintenanceAction(title string, cmdArgs ...string) error {
+	if testCRMAction != nil {
+		return testCRMAction(title, cmdArgs...)
+	}
+	_, err := t.crmDefaultAction(uuid.Nil, title, nil, cmdArgs...)
+	return err
+}
+
+// crmDefaultAction forks a crm command and answers the exit code it ended on.
+//
+// expectExitCodes are the non-zero exit codes the caller asked the command a
+// question it answers with. They end the exec the way a zero does: reported
+// succeeded, logged as an ordinary end, and answered as the code they are.
+func (t *Manager) crmDefaultAction(orchestration uuid.UUID, title string, expectExitCodes []int, cmdArgs ...string) (int, error) {
+	sessionID := xsession.NewSessionID()
+	execID := xsession.NewExecID()
+	orchestrationID := xsession.NewOrchestrationID(orchestration)
+
+	cmdEnv := []string{
+		env.ActionOriginDaemonMonitor.Var(),
+		execID.Var(),
+		sessionID.Var(),
+	}
+	if v := orchestrationID.Var(); v != "" {
+		// Only when this exec is a step of an orchestration. Naming one it is
+		// not a step of would put an id in its logs that matches nothing.
+		cmdEnv = append(cmdEnv, v)
+	}
+
+	cmdOptions := []funcopt.O{
 		command.WithName(cmdPath),
 		command.WithArgs(cmdArgs),
 		command.WithLogger(t.log),
-		command.WithVarEnv(
-			env.ActionOriginDaemonMonitor.Var(),
-			eid.Var(),
-			oid.Var(),
-			sid.Var(),
-		),
-	)
+		command.WithVarEnv(cmdEnv...),
+	}
+	if len(expectExitCodes) > 0 {
+		cmdOptions = append(cmdOptions, command.WithIgnoredExitCodes(append([]int{0}, expectExitCodes...)...))
+	}
+	cmd := command.New(cmdOptions...)
 	labels := append(t.pubLabels, pubsub.Label{"origin", "imon"})
 	if title != "" {
 		t.loggerWithState().Infof("-> exec %s", append([]string{cmdPath}, cmdArgs...))
 	} else {
 		t.loggerWithState().Tracef("-> exec %s", append([]string{cmdPath}, cmdArgs...))
 	}
-	t.publisher.Pub(&msgbus.Exec{
-		Command:   cmd.String(),
-		Node:      t.localhost,
-		Origin:    "imon",
-		ExecID:    eid,
-		SessionID: sid,
-		Title:     title,
-	}, labels...)
 	startTime := time.Now()
+	t.publisher.Pub(&msgbus.Exec{
+		Command:         cmd.String(),
+		Node:            t.localhost,
+		Origin:          "imon",
+		ExecID:          execID,
+		SessionID:       sessionID,
+		OrchestrationID: orchestrationID,
+		StartedAt:       startTime,
+		Title:           title,
+	}, labels...)
 	if err := cmd.Start(); err != nil {
+		// The start of this exec was announced, so its end has to be too, or
+		// it stays running in the exec store for as long as the store keeps
+		// it. There is no exit status to report: it never ran.
+		t.publisher.Pub(&msgbus.ExecFailed{
+			Command:         cmd.String(),
+			Duration:        time.Now().Sub(startTime),
+			ErrS:            err.Error(),
+			ExitCode:        -1,
+			Node:            t.localhost,
+			Origin:          "imon",
+			ExecID:          execID,
+			SessionID:       sessionID,
+			OrchestrationID: orchestrationID,
+			Title:           title,
+		}, labels...)
 		t.loggerWithState().Errorf("exec StartProcess: %s", err)
-		return err
+		return -1, err
 	}
 	pid := cmd.Cmd().Process.Pid
-	proc.Register(proc.T{
-		Pid:          pid,
-		Node:         t.localhost,
-		Object:       t.path.String(),
-		Sid:          sid.String(),
-		StartedAt:    startTime,
-		Elapsed:      "",
-		GlobalExpect: t.state.GlobalExpect.String(),
-		Sub:          "imon",
-		Cmd:          cmd.String(),
-	})
+	proc.Register(proc.T{Pid: pid, ExecID: execID.String()})
 	err := cmd.Wait()
 	proc.Unregister(pid)
 	if err != nil {
 		duration := time.Now().Sub(startTime)
 		t.publisher.Pub(&msgbus.ExecFailed{
-			Command:   cmd.String(),
-			Duration:  duration,
-			ErrS:      err.Error(),
-			Node:      t.localhost,
-			Origin:    "imon",
-			ExecID:    eid,
-			SessionID: sid,
-			Title:     title,
+			Command:         cmd.String(),
+			Duration:        duration,
+			ErrS:            err.Error(),
+			ExitCode:        cmd.NormalizedExitCode(),
+			Node:            t.localhost,
+			Origin:          "imon",
+			ExecID:          execID,
+			SessionID:       sessionID,
+			OrchestrationID: orchestrationID,
+			Title:           title,
 		}, labels...)
 		t.loggerWithState().Errorf("<- exec %s: %s", append([]string{cmdPath}, cmdArgs...), err)
-		return err
+		return cmd.NormalizedExitCode(), err
 	}
 	duration := time.Now().Sub(startTime)
 	t.publisher.Pub(&msgbus.ExecSuccess{
-		Command:   cmd.String(),
-		Duration:  duration,
-		Node:      t.localhost,
-		Origin:    "imon",
-		ExecID:    eid,
-		SessionID: sid,
-		Title:     title,
+		Command:         cmd.String(),
+		Duration:        duration,
+		ExitCode:        cmd.NormalizedExitCode(),
+		Node:            t.localhost,
+		Origin:          "imon",
+		ExecID:          execID,
+		SessionID:       sessionID,
+		OrchestrationID: orchestrationID,
+		Title:           title,
 	}, labels...)
 	if title != "" {
 		t.loggerWithState().Infof("<- exec %s", append([]string{cmdPath}, cmdArgs...))
 	} else {
 		t.loggerWithState().Tracef("<- exec %s", append([]string{cmdPath}, cmdArgs...))
 	}
-	return nil
+	return cmd.NormalizedExitCode(), nil
 }

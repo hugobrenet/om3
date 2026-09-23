@@ -77,6 +77,17 @@ type (
 		// is used (Leaf).
 		Inherit Inherit
 
+		// Since is the release the keyword appeared in. It is read by an
+		// operator asking whether the agent they run has it, and by the
+		// documentation, which says it next to the keyword.
+		//
+		// It is not filled for the keywords that predate it: what a release
+		// has is what its own documentation lists, and when a keyword
+		// appeared is answered for the ones added from here on. A keyword
+		// that is gone is answered by the documentation of the releases that
+		// had it, which no field of a later binary could.
+		Since string
+
 		// Deprecated is the release where the keyword has been deprecated. Users can
 		// expect the keyword to be unsupported in the next release.
 		Deprecated string
@@ -89,6 +100,41 @@ type (
 
 		// RedactSecret means the keyword value will be hidden on config show with the flag --redact-secrets.
 		RedactSecret bool
+
+		// DeprecatedValue is a regular expression matching the values om
+		// still accepts and no longer recommends, and DeprecatedValueText
+		// says what to write instead.
+		//
+		// The keyword itself is the one to use. It is one of the forms it
+		// takes that is on its way out: the size of a logical volume written
+		// as the share of its volume group lvm2 computes, which om never
+		// learns the result of.
+		DeprecatedValue     string
+		DeprecatedValueText string
+
+		// Arithmetic means an expression written "$(...)" in this keyword's
+		// value is computed.
+		//
+		// It is implied by a converter that makes a number, which is most of
+		// the keywords a sum makes sense in. It is declared where the keyword
+		// holds a number but converts to none, because it also accepts a form
+		// no number can express: the size of a logical volume, which lvm2
+		// also takes as a share of the volume group it is carved from.
+		Arithmetic bool
+
+		// Recorded means the value names a thing that now exists, and was
+		// written into the configuration when that thing was made: the id an
+		// object was created with, the uuid an md array was created with and
+		// is assembled by. om writes it where om makes the thing, and an
+		// administrator who makes it themselves writes it themselves.
+		//
+		// A configuration copied to make another thing must not carry it, or
+		// the copy names the original. So these are reset when an object is
+		// cloned: by "om <path> create --config <source>" unless --restore is
+		// given, and by a virtual pool copying its template volume, where a
+		// copy keeping the array uuid assembles the template's array under
+		// its own name instead of making one.
+		Recorded bool
 	}
 
 	Store   []*Keyword
@@ -253,20 +299,20 @@ func (t Store) Lookup(k key.T, kind naming.Kind, sectionType string) *Keyword {
 // driver imports this package, and the policy reads the install grammar of
 // core/datarecv, which imports this package back. The caller of Doc, which
 // sits above both, passes keyoprbac.Doc.
-type RBACDoc func(section, option string) string
+type RBACDoc func(kind naming.Kind, section, option string) string
 
-func (t Store) Doc(w io.Writer, kind naming.Kind, driver, kw string, depth int, rbacDoc RBACDoc) error {
+func (t Store) Doc(w io.Writer, kind naming.Kind, driver, asked string, depth int, rbacDoc RBACDoc) error {
 	depth += 1
-	if kw != "" {
+	if asked != "" {
 		switch len(t) {
 		case 0:
-			return fmt.Errorf("keyword '%s' not found", kw)
+			return fmt.Errorf("keyword '%s' not found", asked)
 		case 1:
-			return t[0].Doc(w, depth, docSection(driver, t[0]), rbacDoc)
+			return t[0].Doc(w, depth, kind, docSection(driver, asked, t[0]), rbacDoc)
 		default:
 			sort.Sort(t)
 			for _, kw := range t {
-				if err := kw.Doc(w, depth, docSection(driver, kw), rbacDoc); err != nil {
+				if err := kw.Doc(w, depth, kind, docSection(driver, asked, kw), rbacDoc); err != nil {
 					return err
 				}
 			}
@@ -380,7 +426,7 @@ func driverDoc(w io.Writer, m map[string]*Keyword, index Index, kind naming.Kind
 
 	for _, opt := range optL {
 		kw := m[opt]
-		kw.Doc(w, depth, section, rbacDoc)
+		kw.Doc(w, depth, kind, section, rbacDoc)
 		fmt.Fprintln(w, "")
 	}
 	return nil
@@ -462,20 +508,33 @@ func (t *Keyword) DefaultKey() key.T {
 // rbac policy is written by. A keyword looked up by name alone is documented
 // with the group of the driver asked for, or with its own section when the
 // keyword is not a driver's.
-func docSection(driver string, kw *Keyword) string {
+func docSection(driver, asked string, kw *Keyword) string {
 	if driver != "" {
 		return ParseIndex(driver)[0]
 	}
-	return kw.Section
+	if kw.Section != "" {
+		return kw.Section
+	}
+	// A driver keyword names no section: it lives in any rid of its driver
+	// group, and which one is not the keyword's to know. The keyword asked
+	// about names one when it is asked about as "volume#1.pool", which is how
+	// the documentation is usually read.
+	if section, _, found := strings.Cut(asked, "."); found {
+		return section
+	}
+	return ""
 }
 
-func (t *Keyword) Doc(w io.Writer, depth int, section string, rbacDoc RBACDoc) error {
+func (t *Keyword) Doc(w io.Writer, depth int, kind naming.Kind, section string, rbacDoc RBACDoc) error {
 	fprintProp := func(a, b string) {
 		fmt.Fprintf(w, "\t%-12s %s\n", a+":", b)
 	}
 	fmt.Fprintf(w, "%s Keyword `%s`\n\n", strings.Repeat("#", depth+1), t.Option)
 	fprintProp("required", fmt.Sprint(t.Required))
 	fprintProp("scopable", fmt.Sprint(t.Scopable))
+	if t.Since != "" {
+		fprintProp("since", t.Since)
+	}
 	if t.Deprecated != "" {
 		// The same phrasing as the config validate alert.
 		s := "since " + t.Deprecated
@@ -489,6 +548,17 @@ func (t *Keyword) Doc(w io.Writer, depth int, section string, rbacDoc RBACDoc) e
 	}
 	if t.RedactSecret {
 		fprintProp("secret", "true")
+	}
+	if t.Arithmetic && t.Converter == nil {
+		// Said only where it is not already implied by the converter, which
+		// would otherwise print it on most of the keywords there are.
+		fprintProp("arithmetic", "an expression written $(...) is computed")
+	}
+	if t.Recorded {
+		// Said as what it means for the reader of a configuration holding
+		// one: what it names already exists, and a copy of this object does
+		// not get it.
+		fprintProp("recorded", "written when what it names is made, and reset when the object is cloned")
 	}
 	if len(t.Candidates) > 0 {
 		fprintProp("candidates", strings.Join(t.Candidates, ", "))
@@ -507,7 +577,7 @@ func (t *Keyword) Doc(w io.Writer, depth int, section string, rbacDoc RBACDoc) e
 		fprintProp("convert", t.Converter.String())
 	}
 	if rbacDoc != nil {
-		if s := rbacDoc(section, t.Option); s != "" {
+		if s := rbacDoc(kind, section, t.Option); s != "" {
 			fprintProp("rbac", s)
 		}
 	}

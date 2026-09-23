@@ -26,19 +26,22 @@ func (a *DaemonAPI) PostInstanceActionDelete(ctx echo.Context, nodename, namespa
 
 func (a *DaemonAPI) postLocalInstanceActionDelete(ctx echo.Context, namespace string, kind naming.Kind, name string, params api.PostInstanceActionDeleteParams) error {
 	log := LogHandler(ctx, "PostInstanceActionDelete")
-	var requesterSid uuid.UUID
+	var requesterSessionID uuid.UUID
 	p, err := naming.NewPath(namespace, kind, name)
 	if err != nil {
 		return JSONProblemf(ctx, http.StatusBadRequest, "Invalid parameters", "%s", err)
 	}
 	log = naming.LogWithPath(log, p)
-	args := []string{p.String(), "instance", "delete"}
-	if params.SessionId != nil {
-		requesterSid = *params.SessionId
+	if v, err := assertConfigUpdatedAt(ctx, p, params.ConfigUpdatedAt); !v {
+		return err
 	}
-	if sid, err := a.apiExec(ctx, p, requesterSid, args, log); err != nil {
+	args := []string{p.String(), "instance", "delete"}
+	if params.SessionID != nil {
+		requesterSessionID = *params.SessionID
+	}
+	if sessionID, execID, err := a.apiExec(ctx, p, requesterSessionID, args, log); err != nil {
 		return JSONProblemf(ctx, http.StatusInternalServerError, "", "%s", err)
 	} else {
-		return ctx.JSON(http.StatusOK, api.InstanceActionAccepted{SessionID: sid})
+		return ctx.JSON(http.StatusOK, api.InstanceActionAccepted{SessionID: sessionID, ExecID: execID})
 	}
 }

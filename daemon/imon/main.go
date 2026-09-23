@@ -61,6 +61,11 @@ type (
 		databus *daemondata.T
 		log     *plog.Logger
 
+		// logBase is log without an orchestration_id attribute, so entering
+		// and leaving an orchestration swaps the attribute instead of
+		// appending another one. zerolog contexts only grow.
+		logBase *plog.Logger
+
 		pendingCtx    context.Context
 		pendingCancel context.CancelFunc
 
@@ -174,6 +179,22 @@ type (
 		// that happened during this daemon last blackout (crash time => rejoin).
 		// i.e. this boolean shortcuts the t.mergePeerFrozen func.
 		isPeerFrozenMerged bool
+
+		// isPeerStoppedMerged remembers we already mirrored locally a peer
+		// instance stopped flag raised while this daemon was down, the way
+		// isPeerFrozenMerged does for the frozen flag.
+		isPeerStoppedMerged bool
+
+		// isBootStartPending says this daemon start follows a node boot, and
+		// that the start an orchestrate=start object is due has not been
+		// decided yet.
+		//
+		// That decision is what orchestrate=start is: the object is started
+		// when its node comes up, and never moved afterwards. The decision is
+		// taken once, on a view of the object complete enough to know whether
+		// it already runs elsewhere, and the window closes with it, so a peer
+		// instance going down hours later is not a reason to start here.
+		isBootStartPending bool
 	}
 
 	// cmdOrchestrate can be used from post action go routines
@@ -278,7 +299,7 @@ func start(parent context.Context, qs pubsub.QueueSizer, p naming.Path, nodes []
 		needStatusQ: make(chan priority.T, 1),
 	}
 
-	t.log = naming.LogWithPath(plog.NewDefaultLogger(), t.path).
+	t.logBase = naming.LogWithPath(plog.NewDefaultLogger(), t.path).
 		Attr("pkg", "daemon/imon").
 		WithPrefix(fmt.Sprintf("daemon: imon: %s: ", t.path.String()))
 	t.logSetOrchestrationID(uuid.Nil)
@@ -294,8 +315,16 @@ func start(parent context.Context, qs pubsub.QueueSizer, p naming.Path, nodes []
 	return nil
 }
 
+// logSetOrchestrationID names in the logs the orchestration this instance
+// monitor is running, and names none when it is running none: an id of
+// zeroes would match nothing a client can ask for, and every entry of every
+// idle monitor would carry it.
 func (t *Manager) logSetOrchestrationID(i uuid.UUID) {
-	t.log = t.log.Attr("orchestration_id", i.String())
+	if i == uuid.Nil {
+		t.log = t.logBase
+		return
+	}
+	t.log = t.logBase.Attr("orchestration_id", i.String())
 }
 
 func (t *Manager) startSubscriptions(qs pubsub.QueueSizer) {
@@ -516,6 +545,12 @@ func (t *Manager) ensureBooted() {
 		// last instance boot id differ from current node boot id
 		// try boot and refresh last instance boot id if succeed
 		t.log.Infof("need boot (node boot id differ from last object boot id)")
+		// This daemon start follows a node boot, which is when an
+		// orchestrate=start object is started. A failed boot does not close
+		// the window: what the boot action cleans up is what a crash left
+		// behind, and the start is refused later if the instance is not in a
+		// state to take it.
+		t.isBootStartPending = true
 		t.transitionTo(instance.MonitorStateBootProgress)
 		if err := t.queueBoot(); err == nil {
 			t.log.Infof("set last object boot id")

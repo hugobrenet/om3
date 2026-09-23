@@ -29,6 +29,7 @@ type (
 	OptsGlobal struct {
 		Color          string
 		Output         string
+		Sort           string
 		ObjectSelector string
 		IgnoreNotFound bool
 	}
@@ -36,6 +37,7 @@ type (
 	OptsNodeGlobal struct {
 		Color          string
 		Output         string
+		Sort           string
 		NodeSelector   string
 		IgnoreNotFound bool
 	}
@@ -284,9 +286,9 @@ func WaitInstanceStatusUpdated(ctx context.Context, c *client.T, nodename string
 // Returns an error if client creation, API calls, or processing fails.
 func RefreshInstanceStatusFromClusterStatus(ctx context.Context, clusterStatus clusterdump.Data) error {
 	var wg sync.WaitGroup
-	sid := api.InQuerySessionID(xsession.Sid().UUID())
+	sessionID := api.SessionID(xsession.SessionID().UUID())
 	params := &api.PostInstanceActionStatusParams{
-		SessionId: &sid,
+		SessionID: &sessionID,
 	}
 	c, err := client.New(client.WithTimeout(0))
 	if err != nil {
@@ -359,6 +361,30 @@ func InstanceStatusUpdatedWaiter(ctx context.Context, paths naming.Paths) (func(
 		}
 	}
 	return func() { wg.Wait() }, nil
+}
+
+// SetKeywordsFromArgs adds the keywords named as positional arguments to the
+// ones the --kw flag named.
+//
+// Naming a keyword is what these commands are for, so it is the argument, and
+// --kw is kept for the scripts written before it was.
+func SetKeywordsFromArgs(keywords *[]string, args []string) {
+	if keywords == nil {
+		panic("SetKeywordsFromArgs call with a nil keywords pointer")
+	}
+	*keywords = append(*keywords, args...)
+}
+
+// SetSectionsFromArgs adds the sections named as positional arguments to the
+// ones the --section flag named.
+//
+// Naming a section is how this command is narrowed, so it is the argument, and
+// --section is kept for the scripts written before it was.
+func SetSectionsFromArgs(sections *[]string, args []string) {
+	if sections == nil {
+		panic("SetSectionsFromArgs call with a nil sections pointer")
+	}
+	*sections = append(*sections, args...)
 }
 
 func SetRIDFromArgs(rid *string, args []string, group, defaultRID string) {

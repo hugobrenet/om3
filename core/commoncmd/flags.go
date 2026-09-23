@@ -5,6 +5,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"github.com/opensvc/om3/v3/util/hostname"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -15,6 +16,7 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/opensvc/om3/v3/core/client"
+	"github.com/opensvc/om3/v3/core/env"
 	"github.com/opensvc/om3/v3/core/instance"
 	"github.com/opensvc/om3/v3/core/naming"
 	"github.com/opensvc/om3/v3/daemon/rbac"
@@ -23,6 +25,7 @@ import (
 func AddFlagsNodeGlobal(flagSet *pflag.FlagSet, p *OptsNodeGlobal) {
 	flagSet.StringVar(&p.Color, "color", "auto", "output colorization yes|no|auto")
 	flagSet.StringVarP(&p.Output, "output", "o", "auto", "output format auto|json|jsonline|yaml|flat|tab=<header>:<jsonpath>,...|template=<go template>")
+	FlagSort(flagSet, &p.Sort)
 	FlagNodeSelector(flagSet, &p.NodeSelector)
 }
 
@@ -105,6 +108,27 @@ func FlagCPUProfile(flags *pflag.FlagSet, p *string) {
 	flags.StringVar(p, "cpuprofile", "", "dump a cpu pprof in this file on exit")
 }
 
+// FlagCredential registers the only way a credential reaches a command,
+// besides the OSVC_CREDENTIAL environment variable. It names a file rather
+// than carrying the value: a command line is readable by any user through the
+// process table, and stays in the shell history.
+func FlagCredential(flags *pflag.FlagSet, p *string) {
+	flags.StringVar(p, "credential", "", "the path of a file holding the <username>:<password> of a user"+
+		" to create on the node once it is alone in its own cluster."+
+		" The user is created in the 'system' namespace, with the 'root' grant."+
+		" Defaults to the "+env.CredentialVar+" environment variable."+
+		" Without either, no user is created")
+}
+
+// FlagToken registers the only way a join token reaches a command, besides
+// the OSVC_JOIN_TOKEN environment variable. It names a file rather than
+// carrying the value, for the reason FlagCredential does.
+func FlagToken(flags *pflag.FlagSet, p *string) {
+	flags.StringVar(p, "token", "", "the path of a file holding an auth token with the 'join' role"+
+		" (created by 'om daemon auth --role join')."+
+		" Defaults to the "+env.JoinTokenVar+" environment variable")
+}
+
 func FlagCreateConfig(flags *pflag.FlagSet, p *string) {
 	flags.StringVar(p, "config", "", "the initial configuration source: -, /dev/stdin, file path, http[s] url, object path or template://<name>")
 }
@@ -118,7 +142,7 @@ func FlagCreateNamespace(flags *pflag.FlagSet, p *string) {
 }
 
 func FlagCreateRestore(flags *pflag.FlagSet, p *bool) {
-	flags.BoolVar(p, "restore", false, "keep the object id defined in the source config")
+	flags.BoolVar(p, "restore", false, "keep what the source configuration recorded of itself: the id it was created with, and the identifiers of the things it holds")
 }
 
 func FlagCron(flags *pflag.FlagSet, p *bool) {
@@ -271,12 +295,25 @@ func FlagNodeSelector(flags *pflag.FlagSet, p *string) {
 	flags.StringVar(p, "node", "", "submit the action to the selected nodes")
 }
 
-func FlagNodeSelectorOrLocalhost(flags *pflag.FlagSet, p *string) {
-	flags.StringVar(p, "node", "localhost", "submit the action to the selected nodes")
+// FlagNodeSelectorOrLocalnode declares the node selector of a command whose
+// subject is this node unless another is named.
+//
+// The default is the name of the node rather than the word "localhost", which
+// the selector has no meaning for: it would look for a node of that name and
+// find none.
+func FlagNodeSelectorOrLocalnode(flags *pflag.FlagSet, p *string) {
+	flags.StringVar(p, "node", hostname.Hostname(), "submit the action to the selected nodes")
 }
 
 func FlagNodeSelectorOrAll(flags *pflag.FlagSet, p *string) {
 	flags.StringVar(p, "node", "*", "submit the action to the selected nodes")
+}
+
+// FlagNodeSelectorWithDefault declares the node selector of a command that om
+// and ox default differently: om answers for the node it runs on, ox has no
+// node of its own to prefer.
+func FlagNodeSelectorWithDefault(flags *pflag.FlagSet, p *string, def string) {
+	flags.StringVar(p, "node", def, "submit the action to the selected nodes")
 }
 
 func FlagNoLock(flags *pflag.FlagSet, p *bool) {
@@ -285,6 +322,10 @@ func FlagNoLock(flags *pflag.FlagSet, p *bool) {
 
 func FlagPoolName(flags *pflag.FlagSet, p *string) {
 	flags.StringVar(p, "name", "", "filter on a pool name")
+}
+
+func FlagPoolPhysical(flags *pflag.FlagSet, p *bool) {
+	flags.BoolVar(p, "physical", false, "show the storage behind the pool instead of what it can hand out")
 }
 
 func FlagPoolStatusExtended(flags *pflag.FlagSet, p *bool) {
@@ -613,6 +654,18 @@ func FlagWatch(flags *pflag.FlagSet, p *bool) {
 
 func FlagColor(flags *pflag.FlagSet, p *string) {
 	flags.StringVar(p, "color", "auto", "output colorization yes|no|auto")
+}
+
+// FlagSort declares the option that orders a listing, overriding the order the
+// command comes in by default.
+//
+// A term names a column, by the header the table shows it under, or the field
+// a tab expression would select. A term prefixed with "-" reverses that term,
+// and a whole expression prefixed with "+" extends the command's default
+// rather than replacing it. A leading "-" has to be written as --sort=-NAME,
+// or the flag parser reads it as the next option.
+func FlagSort(flags *pflag.FlagSet, p *string) {
+	flags.StringVar(p, "sort", "", "order the listing on these columns, lowest first, a name prefixed with - reversing it, a leading + extending the default and . naming the value itself (ex: --sort=-TYPE,RID)")
 }
 
 func FlagOutput(flags *pflag.FlagSet, p *string) {

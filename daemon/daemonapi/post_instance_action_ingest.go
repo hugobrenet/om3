@@ -1,0 +1,72 @@
+package daemonapi
+
+import (
+	"net/http"
+
+	"github.com/google/uuid"
+	"github.com/labstack/echo/v4"
+
+	"github.com/opensvc/om3/v3/core/client"
+	"github.com/opensvc/om3/v3/core/naming"
+	"github.com/opensvc/om3/v3/daemon/api"
+)
+
+func (a *DaemonAPI) PostInstanceActionIngest(ctx echo.Context, nodename, namespace string, kind naming.Kind, name string, params api.PostInstanceActionIngestParams) error {
+	if v, err := assertOperator(ctx, namespace); !v {
+		return err
+	}
+	nodename = a.parseNodename(nodename)
+	if a.localhost == nodename {
+		return a.postLocalInstanceActionIngest(ctx, namespace, kind, name, params)
+	}
+	return a.proxy(ctx, nodename, func(c *client.T) (*http.Response, error) {
+		return c.PostInstanceActionIngest(ctx.Request().Context(), nodename, namespace, kind, name, &params)
+	})
+}
+
+func (a *DaemonAPI) postPeerInstanceActionIngest(ctx echo.Context, nodename, namespace string, kind naming.Kind, name string, params api.PostInstanceActionIngestParams) error {
+	c, err := a.newProxyClient(ctx, nodename)
+	if err != nil {
+		return JSONProblemf(ctx, http.StatusInternalServerError, "New client", "%s: %s", nodename, err)
+	}
+	if resp, err := c.PostInstanceActionIngestWithResponse(ctx.Request().Context(), nodename, namespace, kind, name, &params); err != nil {
+		return JSONProblemf(ctx, http.StatusInternalServerError, "Request peer", "%s: %s", nodename, err)
+	} else if len(resp.Body) > 0 {
+		return ctx.JSONBlob(resp.StatusCode(), resp.Body)
+	}
+	return nil
+}
+
+func (a *DaemonAPI) postLocalInstanceActionIngest(ctx echo.Context, namespace string, kind naming.Kind, name string, params api.PostInstanceActionIngestParams) error {
+	log := LogHandler(ctx, "PostInstanceActionIngest")
+	var requesterSessionID uuid.UUID
+	p, err := naming.NewPath(namespace, kind, name)
+	if err != nil {
+		return JSONProblemf(ctx, http.StatusBadRequest, "Invalid parameters", "%s", err)
+	}
+	log = naming.LogWithPath(log, p)
+	if v, err := assertConfigUpdatedAt(ctx, p, params.ConfigUpdatedAt); !v {
+		return err
+	}
+	// "instance ingest", not "sync ingest": the ingest action is not the sole
+	// business of the sync resources, and no rid means every rid.
+	args := []string{p.String(), "instance", "ingest"}
+	if params.Rid != nil && *params.Rid != "" {
+		args = append(args, "--rid", *params.Rid)
+	}
+	if params.Subset != nil && *params.Subset != "" {
+		args = append(args, "--subset", *params.Subset)
+	}
+	if params.Tag != nil && *params.Tag != "" {
+		args = append(args, "--tag", *params.Tag)
+	}
+	if params.SessionID != nil {
+		requesterSessionID = *params.SessionID
+	}
+	if sessionID, execID, err := a.apiExec(ctx, p, requesterSessionID, args, log); err != nil {
+		return JSONProblemf(ctx, http.StatusInternalServerError, "", "%s", err)
+	} else {
+		return ctx.JSON(http.StatusOK, api.InstanceActionAccepted{SessionID: sessionID, ExecID: execID})
+	}
+
+}
