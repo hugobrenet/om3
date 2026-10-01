@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"strings"
 	"sync"
@@ -116,6 +117,7 @@ func (t *actor) lockedMonitorStatusEval(ctx context.Context, data instance.Statu
 	t.setLastStartedAt(&data)
 	data.UpdatedAt = time.Now()
 	data.FrozenAt = t.Frozen()
+	data.FrozenScope = t.FrozenScope()
 	data.StoppedAt = t.StoppedAt()
 
 	// reset fields that t.resourceStatusEval() will re-evaluate
@@ -142,6 +144,7 @@ func (t *actor) lockedStatusEval(ctx context.Context) (instance.Status, error) {
 	t.setLastStartedAt(&data)
 	data.UpdatedAt = time.Now()
 	data.FrozenAt = t.Frozen()
+	data.FrozenScope = t.FrozenScope()
 	data.StoppedAt = t.StoppedAt()
 	if err := t.resourceStatusEval(ctx, &data, false); err != nil {
 		return data, fmt.Errorf("resource status eval: %w", err)
@@ -189,6 +192,27 @@ func (t *actor) isEncapNodeMatchingResource(r resource.Driver) (bool, error) {
 	return false, nil
 }
 
+// overallContribution is what the status of a resource of group adds to the
+// overall status of the instance.
+//
+// A sync resource says whether the data is replicated, not whether the
+// instance runs: a sync up is nothing to report, and a sync down is a
+// warning. Added as they are, a sync up on an instance down, as the one
+// receiving the replicas is, would aggregate as warn. v2 did the same.
+func overallContribution(group driver.Group, s status.T) status.T {
+	if group != driver.GroupSync {
+		return s
+	}
+	switch s {
+	case status.Up:
+		return status.NotApplicable
+	case status.Down:
+		return status.Warn
+	default:
+		return s
+	}
+}
+
 func (t *actor) resourceStatusEval(ctx context.Context, data *instance.Status, monitoredOnly bool) error {
 	// The resources are configured once here, and not again before each of
 	// them is evaluated.
@@ -212,7 +236,13 @@ func (t *actor) resourceStatusEval(ctx context.Context, data *instance.Status, m
 		data.Resources = make(instance.ResourceStatuses)
 	}
 	doResourceStatus := func(group driver.Group, resourceStatus resource.Status) {
-		data.Overall.Add(resourceStatus.Status)
+		if tm := resourceStatus.OutdatedAt; !tm.IsZero() && (data.OutdatedAt.IsZero() || tm.Before(data.OutdatedAt)) {
+			data.OutdatedAt = tm
+		}
+		if tm := resourceStatus.RPOBreachedAt; !tm.IsZero() && (data.RPOBreachedAt.IsZero() || tm.Before(data.RPOBreachedAt)) {
+			data.RPOBreachedAt = tm
+		}
+		data.Overall.Add(overallContribution(group, resourceStatus.Status))
 		if !resourceStatus.IsOptional {
 			switch group {
 			case driver.GroupSync:
@@ -317,6 +347,12 @@ func (t *actor) resourceStatusEval(ctx context.Context, data *instance.Status, m
 		return nil
 	})
 	mu.Lock()
+	for rid, drv := range t.unsupportedResources() {
+		resourceStatus := unsupportedResourceStatus(drv)
+		data.Resources[rid] = resourceStatus
+		resourceID, _ := resourceid.Parse(rid)
+		doResourceStatus(resourceID.DriverGroup(), resourceStatus)
+	}
 	// No resource contributed to the aggregated status when the object has no
 	// resources at all, or when all its resources are excluded from the
 	// aggregation, like the task and sync ones for avail. Report not
@@ -575,4 +611,35 @@ func resizeSizePair(current, configured int64) (string, string) {
 		return held, target
 	}
 	return fmt.Sprintf("%d bytes", current), fmt.Sprintf("%d bytes", configured)
+}
+
+// unsupportedResources returns the resource sections of a driver this agent
+// does not have, with the driver they name.
+func (t *actor) unsupportedResources() map[string]string {
+	t.Lock()
+	defer t.Unlock()
+	return maps.Clone(t.unsupported)
+}
+
+// unsupportedResourceStatus is the status of a resource section of a driver
+// this agent does not have.
+//
+// The section is not configured, so no action touches it, and the object runs
+// without it. That is said in the status rather than in a trace log: a
+// configuration written for an agent that had the driver, a v2 one among
+// them, describes a resource the object no longer has. The resource is
+// optional, so the warning raises the overall status and leaves the
+// availability alone: an instance going warn over it could trigger its
+// monitor action, a node crash among them, for a resource that never ran.
+func unsupportedResourceStatus(drv string) resource.Status {
+	log := resource.NewStatusLog()
+	log.Warn("the %s driver is not supported by this agent: the resource is ignored", drv)
+	return resource.Status{
+		Label:         drv,
+		Type:          drv,
+		Status:        status.NotApplicable,
+		Log:           log.Entries(),
+		IsOptional:    true,
+		IsProvisioned: resource.ProvisionStatus{State: provisioned.NotApplicable},
+	}
 }

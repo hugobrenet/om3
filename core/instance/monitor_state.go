@@ -52,12 +52,17 @@ const (
 	MonitorStateResizeStage1
 	MonitorStateResizeStage2
 
+	MonitorStateCapProgress
+	MonitorStateCapFailure
+	MonitorStateCapSuccess
+
 	// wait states
 	MonitorStateWaitChildren
 	MonitorStateWaitParents
 	MonitorStateWaitPriors
 	MonitorStateWaitLeader
 	MonitorStateWaitNonLeader
+	MonitorStateWaitSyncs
 
 	// Miscellaneous
 	MonitorStateRunning
@@ -65,6 +70,12 @@ const (
 	MonitorStatePurgeFailed
 	MonitorStateReady
 	MonitorStateRestarted
+
+	// MonitorStateUnknown is what a value this agent does not know decodes to:
+	// a peer running a later version publishes values this one has no
+	// name for, and failing to decode them failed the whole heartbeat
+	// message the peer sent, which is how a peer is found dead.
+	MonitorStateUnknown
 )
 
 var (
@@ -72,6 +83,7 @@ var (
 	StringToMonitorState map[string]MonitorState
 
 	MonitorStatesFailure = []MonitorState{
+		MonitorStateCapFailure,
 		MonitorStateDeleteFailure,
 		MonitorStateFreezeFailure,
 		MonitorStateProvisionFailure,
@@ -139,6 +151,9 @@ func init() {
 		{MonitorStateResizeStage0, "resized:0"},
 		{MonitorStateResizeStage1, "resized:1"},
 		{MonitorStateResizeStage2, "resized:2"},
+		{MonitorStateCapProgress, "capping"},
+		{MonitorStateCapFailure, "cap failed"},
+		{MonitorStateCapSuccess, "capped"},
 
 		// wait states
 		{MonitorStateWaitChildren, "wait children"},
@@ -146,6 +161,7 @@ func init() {
 		{MonitorStateWaitLeader, "wait leader"},
 		{MonitorStateWaitNonLeader, "wait non-leader"},
 		{MonitorStateWaitPriors, "wait priors"},
+		{MonitorStateWaitSyncs, "wait syncs"},
 
 		// Miscellaneous
 		{MonitorStateRunning, "running"},
@@ -153,6 +169,7 @@ func init() {
 		{MonitorStatePurgeFailed, "purge failed"},
 		{MonitorStateReady, "ready"},
 		{MonitorStateRestarted, "restarted"},
+		{MonitorStateUnknown, "unknown"},
 	}
 
 	// Populate the maps

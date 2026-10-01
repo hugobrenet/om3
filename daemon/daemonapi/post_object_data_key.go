@@ -32,6 +32,9 @@ func (a *DaemonAPI) PostObjectDataKey(ctx echo.Context, namespace string, kind n
 	instanceConfigData := instance.ConfigData.GetByPath(p)
 
 	if _, ok := instanceConfigData[a.localhost]; ok {
+		if v, err := assertUsrKeyWrite(ctx, p); !v {
+			return err
+		}
 		ks, err := object.NewDataStore(p)
 
 		switch {
@@ -62,6 +65,7 @@ func (a *DaemonAPI) PostObjectDataKey(ctx echo.Context, namespace string, kind n
 		case err != nil:
 			return JSONProblemf(ctx, http.StatusInternalServerError, "AddKey", "%s: %s", params.Name, err)
 		default:
+			a.announceConfigFileWritten(p)
 			return ctx.NoContent(http.StatusNoContent)
 		}
 	}

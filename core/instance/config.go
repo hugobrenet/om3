@@ -47,8 +47,21 @@ type (
 		Topology         topology.T        `json:"topology,omitempty"`
 		Flex             *FlexConfig       `json:"flex,omitempty"`
 
+		// Claims is what the object claims of each compute type of its
+		// namespace, cluster-wide: thousandths of a cpu, and bytes of memory,
+		// -1 for a type its processes are not capped on.
+		//
+		// It is published with the configuration because that is where a
+		// claim reads what a namespace holds, and a claim is weighed when a
+		// configuration is written, before anything runs.
+		Claims map[string]int64 `json:"claims,omitempty"`
+
 		// IsDisabled is true when DEFAULT.disable is true
 		IsDisabled bool `json:"is_disabled"`
+
+		// WaitSyncsTimeout is how long a stop or a switch waits for the
+		// syncs running on the instance to end: DEFAULT.wait_syncs_timeout.
+		WaitSyncsTimeout time.Duration `json:"wait_syncs_timeout,omitempty"`
 	}
 
 	FlexConfig struct {
@@ -137,6 +150,7 @@ func (cfg *ActorConfig) DeepCopy() *ActorConfig {
 	newCfg.Schedules = deepcopy.Slice(cfg.Schedules)
 	newCfg.Subsets = cfg.Subsets.DeepCopy()
 	newCfg.Resources = cfg.Resources.DeepCopy()
+	newCfg.Claims = deepcopy.Any(cfg.Claims)
 	if cfg.Flex != nil {
 		flex := *cfg.Flex
 		newCfg.Flex = &flex

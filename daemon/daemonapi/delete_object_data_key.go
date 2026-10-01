@@ -28,6 +28,9 @@ func (a *DaemonAPI) DeleteObjectDataKey(ctx echo.Context, namespace string, kind
 	instanceConfigData := instance.ConfigData.GetByPath(p)
 
 	if _, ok := instanceConfigData[a.localhost]; ok {
+		if v, err := assertUsrKeyWrite(ctx, p); !v {
+			return err
+		}
 		ks, err := object.NewDataStore(p)
 
 		switch {
@@ -46,6 +49,7 @@ func (a *DaemonAPI) DeleteObjectDataKey(ctx echo.Context, namespace string, kind
 		case err != nil:
 			return JSONProblemf(ctx, http.StatusInternalServerError, "RemoveKey", "%s: %s", params.Name, err)
 		default:
+			a.announceConfigFileWritten(p)
 			return ctx.NoContent(http.StatusNoContent)
 		}
 	}

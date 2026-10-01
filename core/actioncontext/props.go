@@ -23,6 +23,12 @@ type (
 		// daemon may start it on its own again.
 		ClearsStopped bool
 
+		// StepOf names the action this one is a step of, and is empty for
+		// an action asked for itself. A step flags nothing stopped on
+		// purpose, neither the instance nor a resource: the user asked for
+		// the action it is a step of, not for it.
+		StepOf string
+
 		Rollback        bool
 		PG              bool
 		TimeoutKeywords []string
@@ -176,8 +182,22 @@ var (
 		TimeoutKeywords: []string{"stop_timeout", "timeout"},
 		PG:              true,
 	}
+	// ProvisionStop is the stop ending a provision off the placement
+	// leader, which leaves stopped what the provision started on an
+	// instance it found down.
+	ProvisionStop = Properties{
+		Name:            "stop",
+		Target:          "stopped",
+		Progress:        "stopping",
+		Failure:         "stop failed",
+		MustLock:        true,
+		Order:           ordering.Desc,
+		StepOf:          "provision",
+		TimeoutKeywords: []string{"stop_timeout", "timeout"},
+		PG:              true,
+	}
 	SyncFull = Properties{
-		Name:     "sync_full",
+		Name:     "full",
 		MustLock: true,
 		PG:       true,
 	}
@@ -197,7 +217,7 @@ var (
 		PG:       true,
 	}
 	SyncUpdate = Properties{
-		Name:     "sync_update",
+		Name:     "update",
 		MustLock: true,
 		PG:       true,
 	}

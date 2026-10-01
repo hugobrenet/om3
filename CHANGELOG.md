@@ -223,10 +223,10 @@ OpenSVC v3 is a major evolution, rebuilt in Go for performance, reliability, and
 	   Replaced by `disk#foo.type=drbd`
        
 	* `vdisk`
-	   Replaced by `disk#foo.type=vdisk`
+	   Dropped, and so is the `disk.vdisk` driver: see Drivers removed.
        
 	* `vmdg`
-	   Replaced by `disk#foo.type=vmdg`
+	   Dropped, and so is the `disk.ldom` driver it named: see Drivers removed.
        
 	* `pool`
 	   Replaced by `disk#foo.type=zpool`
@@ -250,10 +250,10 @@ OpenSVC v3 is a major evolution, rebuilt in Go for performance, reliability, and
 	   Replaced by `disk#foo.type=raw`
        
 	* `vxdg`
-	   Replaced by `disk#foo.type=vxdg`
+	   Dropped, and so is the `disk.vxdg` driver: see Drivers removed.
        
 	* `vxvol`
-	   Replaced by `disk#foo.type=vxvol`
+	   Dropped, and so is the `disk.vxvol` driver: see Drivers removed.
 
     For example, a `[md#1]` section needs reformatting as:
     ```
@@ -272,6 +272,19 @@ OpenSVC v3 is a major evolution, rebuilt in Go for performance, reliability, and
     This command no longer accepts a selector, because:
     1/ it is documented the exitcode is the instance status so we can not be ambiguous.
     2/ it is optimized for efficiency as the daemon executes this frequently to refresh instances status data.
+
+* `om node register` deprecates `--user` and `--password`. The collector credentials now reach the command as
+  `--credential`, naming a file holding the `<username>:<password>` of a collector user, and the
+  `OSVC_COLLECTOR_CREDENTIAL` environment variable is read when the option is not set. A password passed as a flag
+  value is readable by any user through the process table, and stays in the shell history.
+
+    The two options are still accepted, so the commands written against the previous release keep working, but they
+    are hidden from the help. A `--credential` wins over them.
+
+    ```
+    om node register --user me --password s3cret   # deprecated, still accepted
+    om node register --credential /etc/opensvc/collector.cred
+    ```
 
 * `--format` is no longer supported with `print status`. The `om svc1 print config --format json | om svc2 create`
   pattern can be replaced by `om svc1 config show | om svc2 create --config=-`
@@ -450,6 +463,37 @@ OpenSVC v3 is a major evolution, rebuilt in Go for performance, reliability, and
 	standby up:   S => o
     ```
  
+### API access to secrets
+
+* **The cluster configuration is read by root only:**
+    `GET /api/cluster/config`, and the configuration file of the cluster through
+    `/api/object/path/root/ccfg/cluster/config/file` and
+    `/api/node/name/{nodename}/instance/path/root/ccfg/cluster/config/file`,
+    now need the `root` grant, or the `join` grant of a joining node. They
+    were open to a guest of the `root` namespace, and the cluster configuration
+    holds `cluster.secret`, the key every sec and usr value is encrypted with.
+
+* **Secrets are redacted for the readers not allowed to see them:**
+    The configuration of an object read by a user who is neither an
+    administrator of its namespace nor root, through the keyword or the file
+    endpoints, shows `********` in place of the values of the keywords
+    declared secret and of the keys of a sec or usr object, raw and evaluated.
+    The `redact-secrets` parameter still redacts for any reader.
+
+* **A user is given only the grants its writer holds:**
+    Writing the `grant` keyword of a usr object refuses the grants the writer
+    does not hold, as v2 did, and changing the `cn` a user authenticates by
+    with its certificate needs the `root` grant. Writing a key of a usr object,
+    its password or its certificate, needs holding every grant of that user,
+    which v2 did not ask. An administrator of the `system` namespace manages
+    the users up to its own grants, and can no longer make itself root by
+    creating a root user or resetting the password of one.
+
+* **The keys of a usr object are read by root only:**
+    `GET /api/object/path/system/usr/{name}/data/key` needed the guest role,
+    and answered the password and the certificate private key of the user,
+    which authenticate as that user.
+
 ### Core
 
 * **Object Names policy change:**
@@ -486,6 +530,26 @@ OpenSVC v3 is a major evolution, rebuilt in Go for performance, reliability, and
     
     Use double quotes instead of quotes, as the strings in the value part already use double quotes.
     Not mixing single and double quotes helps formatting the --filter for `om node events`.
+
+### Drivers removed
+
+These drivers of v2.1 have no v3 counterpart:
+
+* app: `winservice`
+* container: `amazon`, `esx`, `hpvm`, `jail`, `ldom`, `lxd`, `openstack`, `ovm`, `srp`, `vcloud`, `vz`, `xen`, `zone`
+* disk: `advfs`, `amazon`, `gandi`, `gce`, `hpvm`, `ldom`, `pool`, `vdisk`, `veritas`, `vxdg`, `vxvol`
+* fs: `docker`
+* ip: `amazon`, `crossbow`, `gce`, `rule`
+* sync: `btrfs`, `btrfssnap`, `dds`, `docker`, `evasnap`, `hp3par`, `hp3parsnap`, `ibmdssnap`, `necismsnap`, `netapp`, `nexenta`, `oci`, `radosclone`, `radossnap`, `s3`, `symclone`, `symsnap`
+* the `certificate`, `expose`, `hashpolicy`, `route` and `vhost` sections, which
+  described the routes of an object to the envoy ingress gateway of v2.
+
+A section of one of them in an upgraded configuration is not a resource: the
+object runs without it, and no action touches it. The configuration validation
+warns about it, and the instance status lists it as an optional resource with
+the warning `the <driver> driver is not supported by this agent`, which makes
+the overall status of the instance warn. The availability status is not
+changed, so no monitor action is triggered by a resource that never runs.
 
 ### Driver: container
 
@@ -525,6 +589,13 @@ which share the same executor.
     Both decide what the names in a container resolve to, now that om writes
     the resolver rather than the engine, so both require the root grant to set
     through the api.
+
+* **Changed rbac, what of the node a container reaches:**
+    As in v2, a user holding no root grant may not set, on a container or a
+    task, `privileged` to a true value, `netns` to `host`, `devices`, or a
+    `volume_mounts` source that is a path of the node, nor `netns` to `host`
+    on an ip resource. Tasks were not held to the host path mounts rule
+    before.
 
 ### Driver: container.docker
 
@@ -664,9 +735,81 @@ which share the same executor.
 
 * **`sync full` and `sync update`:**
     Now both accept a `--target nodes|drpnodes|node_selector_expr` flag.
+    The peers selected are the ones the `target` keyword of the resource
+    reaches, and a node selector expression selecting none of them is an
+    error.
 
 * **Changed Keyword:**
   * `max_delay` (a.k.a. `sync_max_delay`) default unit is changed from minutes to seconds, so all duration keywords use the same default unit. Set a explicit unit before migration.
+
+* **A sync is sent from the node whose reference resources are up:**
+    As in v2, the resources an object holds its data on or is reached by,
+    every resource but the app, sync and task ones, must be up in aggregate on
+    the node sending, and an object with none of them is not synced. `--force`
+    sends from a node where they are warn. A standby node no longer sends its
+    copy over the one of the active node when the object has no such
+    resource.
+
+* **`max_delay` defaults to the schedule:**
+    Unset, a copy is stale once the first scheduled sync due after the last
+    one is half a schedule period late, instead of the fixed 27 hours of v2.
+
+* **The `update` and `full` actions are gated by `update_requires`:**
+    v2 had a `<action>_requires` keyword per sync action. The one of the
+    update, `sync_update_requires`, is renamed `update_requires`, and gates
+    the `full` action too: a full copy is allowed where an update is.
+    `sync_update_requires`, `sync_nodes_requires` and `sync_drp_requires` are
+    read as aliases, the actions they gated being `update` now. A scheduled
+    update is not scheduled while `update_requires` is not met.
+
+* **The `sync_update` and `sync_full` actions are named `update` and `full`:**
+    As `om <path> instance update` and `om <path> instance full` name them.
+    The logs, the scheduled job list and the `OPENSVC_ACTION` environment
+    variable of the triggers read `update` and `full`. Triggers testing
+    `OPENSVC_ACTION` for `sync_update` or `sync_full` need updating.
+
+* **A stop or a switch waits for the syncs running on the instance:**
+    Stopped under a sync, the instance would hand the peers a copy the sync
+    was writing. An orchestrated stop or switch now waits, in the new `wait
+    syncs` monitor state, for the syncs running on the instance to end, for
+    `wait_syncs_timeout` at most, 10 minutes by default. Past it, the stop
+    fails and the instance keeps running, its monitoring on. No scheduled
+    sync starts while an orchestration is in progress on the object.
+    `--interrupt-syncs` on `stop`, `switch` and `instance stop`, or
+    `interrupt_syncs` in the api, ends the syncs instead of waiting for them.
+    A local `instance stop` finding a sync holding the object lock says so,
+    and waits for it `wait_syncs_timeout`, or the lock timeout if longer, or
+    the `--waitlock` given.
+
+* **A shutdown, as the one of a drained node, interrupts the syncs:**
+    It does not wait for the syncs running on the instance, and does not leave
+    them sending to a peer that takes over: it ends them, the processes they
+    started included, before stopping the resources. No scheduled sync starts
+    on a node being drained.
+
+### Driver: sync.zfs
+
+* **Each peer is synced from its own base snapshot:**
+    The source no longer rotates the `<rid>.sent` and `<rid>.tosend` snapshots
+    shared by all the peers. Each run takes a
+    `<rid>.<YYYYmmddTHHMMSS.ffffffZ>` snapshot, for example
+    `sync.1.20260928T154211.402318Z`, and sends each peer the
+    changes since the newest snapshot the peer holds in common with the
+    source, found by guid. A peer that missed runs catches up at the next
+    one, and a peer failing no longer stops the others. The snapshots of an
+    upgraded agent are used as the base of its peers, then destroyed once no
+    peer needs them. Scripts reading the old snapshot names need updating.
+
+* **New keywords `max_lag_age` and `max_lag_size`:**
+    The source keeps the base snapshot of a lagging peer. Once the peer lags
+    for longer than `max_lag_age` (default `24h`), or the snapshots kept for
+    it hold more than `max_lag_size` (a size, or a percentage of the free
+    space of the pool, default `20%`), the source destroys its base and stops
+    sending to it. The resource status then warns with the command that syncs
+    it again, `om <path> instance full --rid <rid> --target <peer>`. A peer
+    holding snapshots with none in common with the source is also left
+    alone rather than overwritten. A peer holding no snapshot of the
+    resource is still sent a full copy without asking.
 
 ### Driver: app
 
@@ -798,6 +941,20 @@ Where the password is the value of the `þassword` key in `system/sec/relay-v3`.
 
     On upgrade, instances frozen by an older version's stop or create stay frozen, and nothing lifts those freezes any more. Run `om <selector> print status` to find them, and `om <path> unfreeze` on the ones you did not freeze yourself.
 
+* A provision off the placement leader leaves the instance as it found it.
+
+    A provision without `--leader` and without `--disable-rollback` ends by stopping what it started, so the leader is the one to start the object. v2 rolled back the starts of the provision; earlier v3 stopped the whole selection, as a stop asked by the user would: the instance was flagged stopped on purpose, a resource provisioned with `--rid` was flagged stopped (`X`), and a resource provisioned with `--rid` on a running instance was stopped there.
+
+    The stop ending a provision is now a step of it, and flags nothing. It stops only the resources the provision found down, and nothing at all on an instance that was running before it, judged on the resources provisioned already, so a resource added to a running instance is provisioned and left started.
+
+* A node coming back from down adopts only a freeze of the cluster or of an object.
+
+    In v2 and in earlier v3, a daemon joining the cluster froze the node when any peer node had been frozen while it was down, and froze an ha instance when any peer instance had. A node frozen alone for its maintenance froze its peers as they rebooted, and a freeze the daemon took on its own, at the end of a rejoin grace period, spread from node to node through their restarts. A daemon restart also published the node as frozen since its start until it had read its frozen flag, so the daemons restarting with it, as `om daemon restart --node='*'` does, froze on a freeze nobody asked for.
+
+    A node now adopts a freeze of the whole cluster, `om cluster freeze`, and an instance a freeze of the whole object, `om <path> freeze`, that a peer took while the node was down. A node or an instance frozen alone, with `om node freeze` or `om <path> instance freeze`, by a drain, at boot, or by the daemon on its own, stays the only one frozen, and so does a freeze adopted. The node and instance statuses say which a freeze is in `frozen_scope`: `cluster` or `node`, `object` or `instance`.
+
+    On upgrade, the flags of the freezes taken before say nothing of their scope, and read as freezes of the node or the instance alone: a node down across the upgrade does not adopt them.
+
 * An orchestration says how it went, and is waited on by its id.
 
     `ObjectOrchestrationEnd` and `NodeOrchestrationEnd` carry `failed` and `error`, and the orchestration table records them: an orchestration ends when every node is done with it, whether it did what was asked or gave up, so the end was not a verdict and every client had to read the states back and judge for itself. Any node answers, the one that accepted the orchestration from what it published and the others from the state each instance monitor drops the orchestration id with.
@@ -885,6 +1042,32 @@ Where the password is the value of the `þassword` key in `system/sec/relay-v3`.
    `OSVC_CREDENTIAL` environment variable is read when the option is not set. Without either, no user is created and
    the node api stays reachable from a root shell only.
 
+* New `o[mx] cluster register` command, registering every cluster node on the collector in one call.
+
+    The collector mints a registration id for a nodename, so a node cannot register on behalf of another: the command
+    posts to the new `POST /node/name/{nodename}/action/register` endpoint of each node, and each node registers
+    itself and stores its own id in its `node.uuid` keyword. A node already registered is registered again, with a
+    new id.
+
+    Each node registers in the background, so the command reports the order being taken, not the registration being
+    done: a registration sends the initial asset, package and disk inventories, which takes longer than a request
+    should be held open for. Follow it with the `ExecSuccess` and `ExecFailed` events carrying the answered exec id.
+
+    The `--credential` names a file holding the `<username>:<password>` of a collector user, and the
+    `OSVC_COLLECTOR_CREDENTIAL` environment variable is read when the option is not set, so the password never
+    appears in the process table. Without either, each node registers with the id it already holds, as
+    `om node register` without a user does. Use `--app` to name the app to register the nodes in.
+
+    Beware, the credential is forwarded to every cluster node, which is what lets each one register itself.
+
+* `o[mx] node register --node <selector>` registers the selected nodes, through the new register endpoint. The
+    option was already offered, but no command behind it: it failed with `RemoteFunc is nil`.
+
+* New `POST /cluster/register` endpoint, registering every node of the cluster of the requested api node on the
+    collector. It forks a `om cluster register` in the background, so the HTTP response is sent when the command has
+    been forked, not when the nodes are registered. Its optional `credential` parameter is handed to that command
+    through its environment, never on its command line.
+
 * The `om cluster join` command accepts `--addr` to reach the `--node` at an explicit location, for a node that cannot
    resolve the target nodename. Its `--token` names a file holding the token, and the `OSVC_JOIN_TOKEN` environment
    variable is read when the option is not set, so the token never appears in the process table.
@@ -892,6 +1075,24 @@ Where the password is the value of the `þassword` key in `system/sec/relay-v3`.
 ### Daemon
 
 * The daemon process name is changed from `/usr/bin/python3 -m opensvc.daemon` to `om daemon run`. Monitoring checks may need to adapt.
+
+* A node reads the heartbeat messages of a node running a later version.
+
+    A monitor state, an expected state, a status or a placement value a
+    node has no name for is read as `unknown`, or `undef`, instead of failing
+    the whole message, and a node whose message decrypts is counted alive
+    whether or not it decodes, with a warning saying its data is not applied.
+    A node used to find a peer running a later version dead as soon as the
+    peer published a value it did not know, and the split action or a
+    failover followed.
+
+    An orchestration a node does not know is left to the nodes that do: the
+    node does not adopt it, and reads as done to them.
+
+    This holds from this release on, for the upgrades to later ones. To
+    upgrade a cluster node by node, freeze it first (`om cluster freeze`),
+    upgrade every node, and thaw it (`om cluster unfreeze`) once all run the
+    same version.
 
 * Add a 60 seconds timeout to `pre_monitor_action`. The 2.1 daemon waits forever for this callout to terminate.
 

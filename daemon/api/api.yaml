@@ -2,7 +2,7 @@ openapi: 3.0.0
 
 info:
   title: opensvc agent api
-  version: 4.2.0
+  version: 4.5.0
 
 paths:
   /api/array:
@@ -665,6 +665,55 @@ paths:
         - cluster
       x-internal: true
 
+  /api/cluster/register:
+    post:
+      description: |
+        Register every node of the cluster of the requested api node on the
+        collector.
+
+        The requester must be granted the 'root' role.
+
+        The api node forks a 'om cluster register' in the background, which
+        posts POST /api/node/name/{nodename}/action/register on every cluster
+        node. Each node registers itself and stores its own registration id in
+        its node.uuid keyword: the collector mints an id for a nodename, so a
+        node cannot register on behalf of another.
+
+        The optional 'credential' parameter is the <username>:<password> of a
+        collector user able to register a node. It is handed to the forked
+        command through its environment, never on its command line, and it is
+        forwarded from there to every cluster node. Without it, each node
+        registers with the id it already holds.
+
+        The processing is asynchronous. The HTTP response is sent when the
+        command has been forked, not when the nodes are registered. A node
+        that fails to register does not stop the ones after it, so the outcome
+        is per node: read it in the forked command log.
+      operationId: PostClusterRegister
+      requestBody:
+        description: the collector credential, and the app to register the nodes in
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClusterRegisterBody'
+      responses:
+        200:
+          $ref: '#/components/responses/200'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        500:
+          $ref: '#/components/responses/500'
+      security:
+        - basicAuth: [ ]
+        - bearerAuth: [ ]
+      tags:
+        - cluster
+
   /api/cluster/leave:
     post:
       description: |
@@ -727,6 +776,36 @@ paths:
           $ref: '#/components/responses/500'
       tags:
         - cluster
+
+  /api/compute/claim:
+    post:
+      operationId: PostComputeClaim
+      tags:
+        - namespace
+      security:
+        - basicAuth: []
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostComputeClaim'
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ComputeClaim'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        500:
+          $ref: '#/components/responses/500'
 
   /api/instance:
     get:
@@ -1176,6 +1255,65 @@ paths:
               schema:
                 $ref: '#/components/schemas/NodeActionAccepted'
           description: OK
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        500:
+          $ref: '#/components/responses/500'
+
+  /api/node/name/{nodename}/action/register:
+    post:
+      operationId: PostNodeActionRegister
+      tags:
+        - node
+      security:
+        - basicAuth: []
+        - bearerAuth: []
+      description: |
+        Obtain a registration id from the collector, store it in the node
+        configuration node.uuid keyword, and send the initial asset, package
+        and disk discovery.
+
+        The requester must be granted the 'root' role.
+
+        The user and password are the collector credentials, and they are
+        forwarded to the node named in the path, which registers itself: the
+        collector mints a registration id for a nodename, so a node cannot
+        register on behalf of another. A password without a user, or a user
+        without a password, is refused with a 400.
+
+        Without a user, the node registers with the id it already holds, as
+        'om node register' does.
+
+        The processing is asynchronous: the node forks a 'om node register',
+        and the HTTP response is sent when it has been forked, not when the
+        node is registered. The registration sends the initial inventories,
+        which takes longer than a request should be held open for. Follow it
+        with the ExecSuccess and ExecFailed events carrying the answered
+        exec id.
+
+        The registration id is not returned: it is the credential the node
+        authenticates with on the collector from then on.
+      parameters:
+        - $ref: '#/components/parameters/inPathNodeName'
+        - $ref: '#/components/parameters/inQuerySessionID'
+      requestBody:
+        description: the collector credentials and the app to register the node in
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostNodeActionRegisterRequest'
+      responses:
+        200:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeActionAccepted'
+          description: OK
+        400:
+          $ref: '#/components/responses/400'
         401:
           $ref: '#/components/responses/401'
         403:
@@ -3097,6 +3235,7 @@ paths:
         - $ref: '#/components/parameters/inPathName'
         - $ref: '#/components/parameters/inQueryAllSlaves'
         - $ref: '#/components/parameters/inQueryForce'
+        - $ref: '#/components/parameters/inQueryInterruptSyncs'
         - $ref: '#/components/parameters/inQueryMaster'
         - $ref: '#/components/parameters/inQueryMoveTo'
         - $ref: '#/components/parameters/inQuerySessionID'
@@ -4476,6 +4615,58 @@ paths:
         500:
           $ref: '#/components/responses/500'
 
+  /api/object/path/{namespace}/{kind}/{name}/action/cap:
+    post:
+      operationId: PostObjectActionCap
+      summary: Set the process group caps of an object and apply them to its running instances
+      description: |
+        Writes the pg_* keywords the set operations name, as a configuration
+        update would, weighed by the same rbac policy and claim checks, then
+        queues the orchestration applying the configuration written to every
+        running instance of the object. An instance not running applies the
+        caps when it starts.
+
+        A set operation is [<section>.]pg_<name>[@<node>]=<value>, the
+        section being DEFAULT when not named, a subset#<name> or a resource
+        id. Only the pg_* keywords are accepted, and only the = operator: a
+        cap holds one value. A value of "default" lifts the cap.
+
+        A request with no set operation applies the caps the configuration
+        already holds.
+      tags:
+        - object / svc
+        - object / vol
+      security:
+        - basicAuth: []
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/inPathNamespace'
+        - $ref: '#/components/parameters/inPathKind'
+        - $ref: '#/components/parameters/inPathName'
+        - $ref: '#/components/parameters/inQuerySets'
+        - $ref: '#/components/parameters/inQueryConfigUpdatedAt'
+      responses:
+        200:
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrchestrationQueued'
+        400:
+          $ref: '#/components/responses/400'
+        401:
+          $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
+        404:
+          $ref: '#/components/responses/404'
+        408:
+          $ref: '#/components/responses/408'
+        409:
+          $ref: '#/components/responses/409'
+        500:
+          $ref: '#/components/responses/500'
+
   /api/object/path/{namespace}/{kind}/{name}/action/delete:
     post:
       operationId: PostObjectActionDelete
@@ -4785,6 +4976,7 @@ paths:
         - $ref: '#/components/parameters/inPathNamespace'
         - $ref: '#/components/parameters/inPathKind'
         - $ref: '#/components/parameters/inPathName'
+        - $ref: '#/components/parameters/inQueryInterruptSyncs'
       responses:
         200:
           description: OK
@@ -4972,7 +5164,25 @@ paths:
       security:
         - basicAuth: []
         - bearerAuth: []
-      description: Delete sections, unset and set keywords in the object configuration file.
+      description: |
+        Delete sections, unset and set keywords in the object configuration file.
+
+        With wait, the answer is held until the configuration written has
+        reached every live node of the object, which is when an action asked
+        of any of them runs on it. A node is live while the heartbeats of the
+        cluster reach it: a node that is down fetches the configuration when
+        it comes back, and is not waited for.
+
+        A wait that expires is answered 408, naming the nodes the
+        configuration has not reached. The configuration is written all the
+        same, and the answer carries the OM-Last-Modified timestamp an action
+        can require with its config_updated_at parameter. A 408 is not to be
+        answered by writing again: a += operation would apply twice.
+
+        The update is checked against the configuration read when the
+        request arrives, and written only over it: a configuration another
+        write changed meanwhile is answered 409, and nothing is written.
+        Ask again, to be checked against the configuration as it now is.
       parameters:
         - $ref: '#/components/parameters/inPathNamespace'
         - $ref: '#/components/parameters/inPathKind'
@@ -4980,6 +5190,7 @@ paths:
         - $ref: '#/components/parameters/inQueryDeletes'
         - $ref: '#/components/parameters/inQueryUnsets'
         - $ref: '#/components/parameters/inQuerySets'
+        - $ref: '#/components/parameters/inQueryWait'
       responses:
         200:
           description: OK
@@ -4995,6 +5206,10 @@ paths:
           $ref: '#/components/responses/403'
         404:
           $ref: '#/components/responses/404'
+        408:
+          $ref: '#/components/responses/408'
+        409:
+          $ref: '#/components/responses/409'
         500:
           $ref: '#/components/responses/500'
 
@@ -5055,6 +5270,7 @@ paths:
         - $ref: '#/components/parameters/inPathNamespace'
         - $ref: '#/components/parameters/inPathKind'
         - $ref: '#/components/parameters/inPathName'
+        - $ref: '#/components/parameters/inQueryWait'
       requestBody:
         description: OK
         content:
@@ -5082,6 +5298,8 @@ paths:
           $ref: '#/components/responses/403'
         404:
           $ref: '#/components/responses/404'
+        408:
+          $ref: '#/components/responses/408'
         409:
           $ref: '#/components/responses/409'
         500:
@@ -5102,6 +5320,7 @@ paths:
         - $ref: '#/components/parameters/inPathNamespace'
         - $ref: '#/components/parameters/inPathKind'
         - $ref: '#/components/parameters/inPathName'
+        - $ref: '#/components/parameters/inQueryWait'
       requestBody:
         description: OK
         content:
@@ -5129,6 +5348,8 @@ paths:
           $ref: '#/components/responses/403'
         404:
           $ref: '#/components/responses/404'
+        408:
+          $ref: '#/components/responses/408'
         409:
           $ref: '#/components/responses/409'
         500:
@@ -5167,6 +5388,8 @@ paths:
           $ref: '#/components/responses/400'
         401:
           $ref: '#/components/responses/401'
+        403:
+          $ref: '#/components/responses/403'
         500:
           $ref: '#/components/responses/500'
 
@@ -5888,6 +6111,23 @@ components:
             It must outlive the node drain.
           default: 1h
           example: 1h
+
+    ClusterRegisterBody:
+      type: object
+      properties:
+        credential:
+          type: string
+          description: |
+            The <username>:<password> of a collector user able to register a
+            node. Both halves must be set. Without this parameter, each node
+            registers with the registration id it already holds.
+          example: collectoruser:secret
+        app:
+          type: string
+          description: |
+            Register the nodes in this app. Without it, the node app keyword
+            is used, or the collector picks an app owned by the user.
+          example: MyApp
 
     ClusterEvictBody:
       type: object
@@ -6771,6 +7011,15 @@ components:
           type: array
           items:
             type: string
+        claims:
+          description: |
+            what the object claims of each compute type of its namespace,
+            cluster-wide: thousandths of a cpu for cpu, bytes for memory, and
+            -1 for a type its processes are not capped on
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
         drp:
           type: boolean
         env:
@@ -6976,6 +7225,13 @@ components:
         frozen_at:
           type: string
           format: date-time
+        frozen_scope:
+          type: string
+          description: |
+            The scope of the freeze of a frozen instance: "object" when a
+            freeze of the object froze it, "instance" when it was frozen
+            alone. A node that missed a freeze of the object adopts it when
+            it comes back.
         last_started_at:
           type: string
           format: date-time
@@ -7275,6 +7531,50 @@ components:
           x-go-name: RID
         network:
           $ref: '#/components/schemas/NetworkIPNetwork'
+
+    PostComputeClaim:
+      type: object
+      required:
+        - namespace
+        - path
+        - claims
+      properties:
+        namespace:
+          description: the namespace the object claims of
+          type: string
+        path:
+          description: |
+            the object the claim is for, so that a claim answered yes stops
+            being counted on its own once the configuration of the object
+            says the same thing
+          type: string
+        claims:
+          description: |
+            what the object is to claim of each compute type, not the
+            increase: thousandths of a cpu for cpu, bytes for memory, and -1
+            for a type its processes are not capped on
+          type: object
+          additionalProperties:
+            type: integer
+            format: int64
+
+    ComputeClaim:
+      type: object
+      required:
+        - granted
+      properties:
+        granted:
+          description: whether the namespace may take what it asked for
+          type: boolean
+        reason:
+          description: why the namespace may not take it
+          type: string
+        expires_at:
+          description: |
+            when a granted claim stops being counted, should the
+            configuration it was granted for never be written
+          type: string
+          format: date-time
 
     PostNetworkClaim:
       type: object
@@ -7638,6 +7938,12 @@ components:
         frozen_at:
           type: string
           format: date-time
+        frozen_scope:
+          type: string
+          description: |
+            The scope of the freeze of a frozen node: "cluster" when a freeze
+            of the cluster froze it, "node" when it was frozen alone. A node
+            that missed a freeze of the cluster adopts it when it comes back.
         gen:
           additionalProperties:
             type: integer
@@ -8205,6 +8511,19 @@ components:
         is_partial:
           type: boolean
 
+    PostNodeActionRegisterRequest:
+      type: object
+      properties:
+        user:
+          type: string
+          description: the collector user to authenticate as. Without it, the node registers with the id it already holds.
+        password:
+          type: string
+          description: the collector user password
+        app:
+          type: string
+          description: register the node in this app. Without it, the node app keyword is used, or the collector picks an app owned by the user.
+
     PostNodeDRBDConfigRequest:
       type: object
       required:
@@ -8251,6 +8570,11 @@ components:
           items:
             type: string
         live:
+          type: boolean
+        interrupt_syncs:
+          description: |
+            End the syncs running on the instance stopped before stopping
+            it, instead of waiting for them to end.
           type: boolean
 
     PostRelayMessage:
@@ -8788,6 +9112,13 @@ components:
         - tags
         - type
       properties:
+        depends_on_peers:
+          type: boolean
+          description: |
+            the status reads a state the actions of the peer instances
+            change, like a scsi reservation or the roles of a replicated
+            device: the daemon evaluates it again when a peer instance
+            status changes
         disable:
           type: boolean
           description: hints the resource ignores all state transition actions
@@ -8984,11 +9315,13 @@ components:
         last_run_at:
           type: string
           format: date-time
+          nullable: true
         max_parallel:
           type: integer
         next_run_at:
           type: string
           format: date-time
+          nullable: true
         require:
           type: string
         require_collector:
@@ -9032,7 +9365,7 @@ components:
         kind:
           type: string
           enum:
-            - ResourceItem
+            - ScheduleItem
         meta:
           $ref: '#/components/schemas/InstanceMeta'
         data:
@@ -9540,6 +9873,15 @@ components:
     inQueryForce:
       in: query
       name: force
+      schema:
+        type: boolean
+
+    inQueryInterruptSyncs:
+      in: query
+      name: interrupt_syncs
+      description: |
+        End the syncs running on the instance before stopping it, instead of
+        waiting for them to end.
       schema:
         type: boolean
 

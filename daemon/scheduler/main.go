@@ -19,7 +19,6 @@ import (
 	"github.com/opensvc/om3/v3/core/resourceid"
 	"github.com/opensvc/om3/v3/core/resourcereqs"
 	"github.com/opensvc/om3/v3/core/schedule"
-	"github.com/opensvc/om3/v3/core/status"
 	"github.com/opensvc/om3/v3/core/topology"
 	"github.com/opensvc/om3/v3/daemon/daemondata"
 	"github.com/opensvc/om3/v3/daemon/daemonsubsystem"
@@ -43,11 +42,21 @@ type (
 		databus   *daemondata.T
 		publisher pubsub.Publisher
 
-		jobs                Jobs
-		events              chan any
-		enabled             bool
-		provisioned         map[naming.Path]bool
-		failover            map[naming.Path]bool
+		jobs        Jobs
+		events      chan any
+		enabled     bool
+		provisioned map[naming.Path]bool
+		failover    map[naming.Path]bool
+
+		// notSource says why the local instance of an object is not
+		// the one its data is replicated from, "" when it is, for the
+		// jobs requiring the replication source. It is updated from
+		// the local InstanceStatusUpdated events.
+		notSource map[naming.Path]string
+
+		// localStatus is the last status of the local instance of each
+		// object, the requirements of its jobs are evaluated from.
+		localStatus         map[naming.Path]instance.Status
 		schedules           Schedules
 		isCollectorJoinable bool
 
@@ -193,6 +202,8 @@ func New(subQS pubsub.QueueSizer, opts ...funcopt.O) *T {
 		schedules:         make(Schedules),
 		failover:          make(map[naming.Path]bool),
 		provisioned:       make(map[naming.Path]bool),
+		notSource:         make(map[naming.Path]string),
+		localStatus:       make(map[naming.Path]instance.Status),
 		subQS:             subQS,
 		lastRunOnAllPeers: make(timeMap),
 		reqSatisfied:      make(errMap),
@@ -426,6 +437,28 @@ func (t *T) onJobAlarm(c eventJobAlarm) {
 			logger.Infof("abort (no longer provisioned)")
 			return
 		}
+		if e.RequireReplicationSource {
+			if reason := t.notSource[e.Path]; reason != "" {
+				logger.Infof("abort (no longer the replication source: %s)", reason)
+				return
+			}
+			// A sync started while the object is being stopped or
+			// switched holds the object lock the stop needs, and may
+			// be sending when the peer takes over. The next period
+			// syncs, if this node is still the source.
+			if mon := instance.MonitorData.GetByPathAndNode(e.Path, t.localhost); mon != nil && mon.GlobalExpect != instance.MonitorGlobalExpectNone && mon.GlobalExpect != instance.MonitorGlobalExpectInit {
+				logger.Infof("skip (orchestration %s in progress)", mon.GlobalExpect)
+				return
+			}
+			// A node being drained shuts its instances down without
+			// waiting for the syncs, and interrupts the ones running: a
+			// sync started meanwhile would be sending while a peer
+			// takes over.
+			if mon := node.MonitorData.GetByNode(t.localhost); mon != nil && mon.LocalExpect == node.MonitorLocalExpectDrained {
+				logger.Infof("skip (node draining)")
+				return
+			}
+		}
 		if satisfied, ok := t.reqSatisfied.Get(e.Path, e.Key); ok {
 			if satisfied != nil {
 				logger.Infof("abort (requirements no longer met)")
@@ -643,56 +676,65 @@ func (t *T) onInstanceStatusUpdated(c *msgbus.InstanceStatusUpdated) bool {
 }
 
 func (t *T) onLocalInstanceStatusUpdated(c *msgbus.InstanceStatusUpdated) bool {
+	// The status is kept whether or not the schedules of the object are
+	// known yet: at daemon start, the first status comes before them, and
+	// scheduleObject evaluates the requirements of the jobs from it.
+	t.localStatus[c.Path] = c.Value
+	changed := t.updateNotSource(c.Path, c.Value)
+
 	schedules, ok := t.schedules[c.Path]
 	if !ok {
-		return false
+		return changed
 	}
 
 	t.lastRunOnAllPeers.Set(c.Path, kwoption.ScheduleStatus, c.Value.UpdatedAt)
 
-	checkReq := func(rid string, requiredStatusList status.L) error {
-		resourceStatus, ok := c.Value.Resources[rid]
+	for _, e := range schedules {
+		if e.Require == "" {
+			continue
+		}
+		if t.updateReqSatisfied(c.Path, e, c.Value) {
+			changed = true
+		}
+	}
+	return changed
+}
+
+// checkRequire says why the requirement of a job is not met by the instance
+// status st, nil when all its conditions are.
+func checkRequire(require string, st instance.Status) error {
+	for rid, requiredStatusList := range resourcereqs.New(require).Requirements() {
+		resourceStatus, ok := st.Resources[rid]
 		if !ok {
 			return fmt.Errorf("resource %s not found in the instance status data", rid)
 		}
 		if !requiredStatusList.Has(resourceStatus.Status) {
 			return fmt.Errorf("resource %s status is %s, required %s", rid, resourceStatus.Status, requiredStatusList)
 		}
-		return nil
 	}
+	return nil
+}
 
-	changed := false
-
-	for _, e := range schedules {
-		if e.Require == "" {
-			continue
-		}
-		log := t.jobLogger(e)
-		reqs := resourcereqs.New(e.Require)
-		for requiredRID, requiredStatusList := range reqs.Requirements() {
-			satisfied := checkReq(requiredRID, requiredStatusList)
-			currentlySatisfied, ok := t.reqSatisfied.Get(c.Path, e.Key)
-			t.reqSatisfied.Set(c.Path, e.Key, satisfied)
-			if satisfied != nil {
-				if !ok {
-					log.Tracef("requirement unsatisfied: %s", satisfied)
-					changed = true
-				} else if currentlySatisfied == nil {
-					log.Tracef("requirement no longer satisfied: %s", satisfied)
-					changed = true
-				}
-			} else {
-				if !ok {
-					log.Tracef("requirement satisfied: %s", e.Require)
-					changed = true
-				} else if currentlySatisfied != nil {
-					log.Tracef("requirement now satisfied: %s", e.Require)
-					changed = true
-				}
-			}
-		}
+// updateReqSatisfied records whether the requirement of the job e is met by
+// the instance status st, and reports whether that changed.
+func (t *T) updateReqSatisfied(path naming.Path, e schedule.Entry, st instance.Status) bool {
+	log := t.jobLogger(e)
+	satisfied := checkRequire(e.Require, st)
+	currentlySatisfied, ok := t.reqSatisfied.Get(path, e.Key)
+	t.reqSatisfied.Set(path, e.Key, satisfied)
+	switch {
+	case satisfied != nil && !ok:
+		log.Tracef("requirement unsatisfied: %s", satisfied)
+	case satisfied != nil && currentlySatisfied == nil:
+		log.Tracef("requirement no longer satisfied: %s", satisfied)
+	case satisfied == nil && !ok:
+		log.Tracef("requirement satisfied: %s", e.Require)
+	case satisfied == nil && currentlySatisfied != nil:
+		log.Tracef("requirement now satisfied: %s", e.Require)
+	default:
+		return false
 	}
-	return changed
+	return true
 }
 
 func (t *T) onPeerInstanceStatusUpdated(c *msgbus.InstanceStatusUpdated) bool {
@@ -827,6 +869,8 @@ func (t *T) onObjectStatusDeleted(c *msgbus.ObjectStatusDeleted) {
 	t.reqSatisfied.UnsetPath(c.Path)
 	delete(t.provisioned, c.Path)
 	delete(t.failover, c.Path)
+	delete(t.notSource, c.Path)
+	delete(t.localStatus, c.Path)
 }
 
 func (t *T) onObjectStatusUpdated(c *msgbus.ObjectStatusUpdated) {
@@ -867,6 +911,18 @@ func (t *T) updateFailover(path naming.Path, state topology.T) bool {
 		return true
 	}
 	return false
+}
+
+// updateNotSource records whether the local instance of path is the one its
+// data is replicated from, and reports whether that changed.
+func (t *T) updateNotSource(path naming.Path, st instance.Status) bool {
+	isSource, reason := st.ReplicationSource()
+	if isSource {
+		reason = ""
+	}
+	was, ok := t.notSource[path]
+	t.notSource[path] = reason
+	return !ok || (was == "") != (reason == "")
 }
 
 func (t *T) updateProvisioned(path naming.Path, state provisioned.T) bool {
@@ -1113,6 +1169,35 @@ func (t *T) scheduleObject(path naming.Path) {
 			return
 		}
 
+		// The requirements not evaluated yet are evaluated from the last
+		// status of the instance, when one came before the schedules.
+		if st, ok := t.localStatus[path]; ok {
+			if _, ok := t.notSource[path]; !ok && e.RequireReplicationSource {
+				t.updateNotSource(path, st)
+			}
+			if _, ok := t.reqSatisfied.Get(path, e.Key); !ok && e.Require != "" {
+				t.updateReqSatisfied(path, e, st)
+			}
+		}
+		if e.RequireReplicationSource {
+			reason, ok := t.notSource[path]
+			switch {
+			case !ok:
+				reason = "replication source not yet evaluated"
+			case reason != "":
+				reason = "not the replication source: " + reason
+			}
+			if reason != "" {
+				if hasJob {
+					log.Infof("unschedule (%s)", reason)
+					t.jobs.Del(e)
+				} else {
+					skipped = reason
+				}
+				return
+			}
+			validated = append(validated, "replication source")
+		}
 		if e.RequireProvisioned {
 			if !hasProvisioned {
 				if hasJob {
@@ -1198,6 +1283,8 @@ func (t *T) unscheduleRequireCollector() {
 
 func (t *T) unschedule(path naming.Path) {
 	t.reqSatisfied.UnsetPath(path)
+	delete(t.notSource, path)
+	delete(t.localStatus, path)
 	t.schedules.DelPath(path)
 	t.jobs.DelPath(path)
 }

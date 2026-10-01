@@ -68,7 +68,38 @@ func FlagsLogs(flags *pflag.FlagSet, p *OptsLogs) {
 
 func FlagsLock(flags *pflag.FlagSet, p *OptsLock) {
 	FlagNoLock(flags, &p.Disable)
-	FlagWaitLock(flags, &p.Timeout)
+	flagWaitLockOpts(flags, p)
+}
+
+// waitLockValue is the --waitlock value, recording it was set.
+type waitLockValue struct {
+	p *OptsLock
+}
+
+func (v waitLockValue) String() string {
+	if v.p == nil {
+		return ""
+	}
+	return v.p.Timeout.String()
+}
+
+func (v waitLockValue) Set(s string) error {
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return err
+	}
+	v.p.Timeout = d
+	v.p.TimeoutSet = true
+	return nil
+}
+
+func (v waitLockValue) Type() string {
+	return "duration"
+}
+
+func flagWaitLockOpts(flags *pflag.FlagSet, p *OptsLock) {
+	p.Timeout = 30 * time.Second
+	flags.Var(waitLockValue{p: p}, "waitlock", "lock acquire timeout")
 }
 
 func FlagsEncap(flags *pflag.FlagSet, p *OptsEncap) {
@@ -217,6 +248,10 @@ func FlagEventTemplate(flags *pflag.FlagSet, p *string) {
 
 func FlagEventWait(flags *pflag.FlagSet, p *bool) {
 	flags.BoolVar(p, "wait", false, "wait for the event reach its target state. This automatically enables the --replay flag")
+}
+
+func FlagInterruptSyncs(flags *pflag.FlagSet, p *bool) {
+	flags.BoolVar(p, "interrupt-syncs", false, "end the syncs running on the instance before stopping it, instead of waiting for them to end")
 }
 
 func FlagForce(flags *pflag.FlagSet, p *bool) {
@@ -536,12 +571,30 @@ func FlagTime(flags *pflag.FlagSet, p *time.Duration) {
 	flags.DurationVar(p, "time", 5*time.Minute, "stop waiting for the object to reach the target state after a duration")
 }
 
-func FlagCollectorUser(flags *pflag.FlagSet, p *string) {
-	flags.StringVar(p, "user", "", "authenticate with the collector using this user")
+// FlagCollectorCredential registers the only way a collector credential
+// reaches a command, besides the OSVC_COLLECTOR_CREDENTIAL environment
+// variable. It names a file rather than carrying the value, for the reason
+// FlagCredential does.
+func FlagCollectorCredential(flags *pflag.FlagSet, p *string) {
+	flags.StringVar(p, "credential", "", "the path of a file holding the <username>:<password> of a collector user"+
+		" able to register a node."+
+		" Defaults to the "+env.CollectorCredentialVar+" environment variable")
 }
 
+// FlagCollectorUser registers the deprecated --user option, kept for the
+// commands that were typed against the previous release. It is hidden:
+// --credential is the documented way in, because it names a file instead of
+// carrying the password on a command line.
+func FlagCollectorUser(flags *pflag.FlagSet, p *string) {
+	flags.StringVar(p, "user", "", "authenticate with the collector using this user")
+	flags.MarkHidden("user")
+}
+
+// FlagCollectorPassword registers the deprecated --password option, hidden
+// for the reason FlagCollectorUser is.
 func FlagCollectorPassword(flags *pflag.FlagSet, p *string) {
 	flags.StringVar(p, "password", "", "authenticate with the collector using this password")
+	flags.MarkHidden("password")
 }
 
 func FlagCollectorApp(flags *pflag.FlagSet, p *string) {
@@ -605,7 +658,7 @@ func FlagTag(flags *pflag.FlagSet, p *string) {
 }
 
 func FlagTarget(flags *pflag.FlagSet, p *[]string) {
-	flags.StringSliceVar(p, "target", []string{}, "the peers to sync to (ex: nodes or drpnodes)")
+	flags.StringSliceVar(p, "target", []string{}, "the peers to sync to: nodes, drpnodes, local or a node selector expression (ex: nodes or n2,n3)")
 }
 
 func FlagUpdateDelete(flags *pflag.FlagSet, p *[]string) {
@@ -642,10 +695,6 @@ func FlagEventLimit(flags *pflag.FlagSet, p *uint64) {
 
 func FlagWait(flags *pflag.FlagSet, p *bool) {
 	flags.BoolVar(p, "wait", false, "wait for the object to reach the target state")
-}
-
-func FlagWaitLock(flags *pflag.FlagSet, p *time.Duration) {
-	flags.DurationVar(p, "waitlock", 30*time.Second, "lock acquire timeout")
 }
 
 func FlagWatch(flags *pflag.FlagSet, p *bool) {
@@ -688,7 +737,8 @@ func HiddenFlagsEncap(flags *pflag.FlagSet, p *OptsEncap) {
 
 func HiddenFlagsLock(flags *pflag.FlagSet, p *OptsLock) {
 	HiddenFlagNoLock(flags, &p.Disable)
-	HiddenFlagWaitLock(flags, &p.Timeout)
+	flagWaitLockOpts(flags, p)
+	flags.MarkHidden("waitlock")
 }
 
 // HiddenFlagsResourceSelectorWithCompletion adds hidden resource selector flags to the given command
@@ -763,11 +813,6 @@ func HiddenFlagTo(flags *pflag.FlagSet, p *string) {
 func HiddenFlagTag(flags *pflag.FlagSet, p *string) {
 	FlagTag(flags, p)
 	flags.MarkHidden("tag")
-}
-
-func HiddenFlagWaitLock(flags *pflag.FlagSet, p *time.Duration) {
-	flags.DurationVar(p, "waitlock", 30*time.Second, "lock acquire timeout")
-	flags.MarkHidden("waitlock")
 }
 
 func HiddenFlagObjectSelector(flags *pflag.FlagSet, p *string) {

@@ -827,13 +827,13 @@ func (e SANPathListKind) Valid() bool {
 
 // Defines values for ScheduleItemKind.
 const (
-	ScheduleItemKindResourceItem ScheduleItemKind = "ResourceItem"
+	ScheduleItemKindScheduleItem ScheduleItemKind = "ScheduleItem"
 )
 
 // Valid indicates whether the value is a known member of the ScheduleItemKind enum.
 func (e ScheduleItemKind) Valid() bool {
 	switch e {
-	case ScheduleItemKindResourceItem:
+	case ScheduleItemKindScheduleItem:
 		return true
 	default:
 		return false
@@ -1096,12 +1096,37 @@ type ClusterEvictBody struct {
 	Timeout *string `json:"timeout,omitempty"`
 }
 
+// ClusterRegisterBody defines model for ClusterRegisterBody.
+type ClusterRegisterBody struct {
+	// App Register the nodes in this app. Without it, the node app keyword
+	// is used, or the collector picks an app owned by the user.
+	App *string `json:"app,omitempty"`
+
+	// Credential The <username>:<password> of a collector user able to register a
+	// node. Both halves must be set. Without this parameter, each node
+	// registers with the registration id it already holds.
+	Credential *string `json:"credential,omitempty"`
+}
+
 // ClusterStatus defines model for ClusterStatus.
 type ClusterStatus = map[string]interface{}
 
 // Committed defines model for Committed.
 type Committed struct {
 	IsChanged bool `json:"is_changed"`
+}
+
+// ComputeClaim defines model for ComputeClaim.
+type ComputeClaim struct {
+	// ExpiresAt when a granted claim stops being counted, should the
+	// configuration it was granted for never be written
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+
+	// Granted whether the namespace may take what it asked for
+	Granted bool `json:"granted"`
+
+	// Reason why the namespace may not take it
+	Reason *string `json:"reason,omitempty"`
 }
 
 // DNSRecord defines model for DNSRecord.
@@ -1773,14 +1798,19 @@ type NodeMonitor struct {
 
 // NodeStatus defines model for NodeStatus.
 type NodeStatus struct {
-	Agent        string                      `json:"agent"`
-	API          string                      `json:"api"`
-	Arbitrators  map[string]ArbitratorStatus `json:"arbitrators"`
-	Compat       uint64                      `json:"compat"`
-	FrozenAt     time.Time                   `json:"frozen_at"`
-	Gen          map[string]uint64           `json:"gen"`
-	IsLeader     bool                        `json:"is_leader"`
-	IsOverloaded bool                        `json:"is_overloaded"`
+	Agent       string                      `json:"agent"`
+	API         string                      `json:"api"`
+	Arbitrators map[string]ArbitratorStatus `json:"arbitrators"`
+	Compat      uint64                      `json:"compat"`
+	FrozenAt    time.Time                   `json:"frozen_at"`
+
+	// FrozenScope The scope of the freeze of a frozen node: "cluster" when a freeze
+	// of the cluster froze it, "node" when it was frozen alone. A node
+	// that missed a freeze of the cluster adopts it when it comes back.
+	FrozenScope  *string           `json:"frozen_scope,omitempty"`
+	Gen          map[string]uint64 `json:"gen"`
+	IsLeader     bool              `json:"is_leader"`
+	IsOverloaded bool              `json:"is_overloaded"`
 }
 
 // NodesInfo defines model for NodesInfo.
@@ -2132,6 +2162,22 @@ type PoolVolumeList struct {
 // PoolVolumeListKind defines model for PoolVolumeList.Kind.
 type PoolVolumeListKind string
 
+// PostComputeClaim defines model for PostComputeClaim.
+type PostComputeClaim struct {
+	// Claims what the object is to claim of each compute type, not the
+	// increase: thousandths of a cpu for cpu, bytes for memory, and -1
+	// for a type its processes are not capped on
+	Claims map[string]int64 `json:"claims"`
+
+	// Namespace the namespace the object claims of
+	Namespace string `json:"namespace"`
+
+	// Path the object the claim is for, so that a claim answered yes stops
+	// being counted on its own once the configuration of the object
+	// says the same thing
+	Path string `json:"path"`
+}
+
 // PostInstanceProgress defines model for PostInstanceProgress.
 type PostInstanceProgress struct {
 	IsPartial *bool              `json:"is_partial,omitempty"`
@@ -2156,6 +2202,18 @@ type PostNetworkClaim struct {
 	RID string `json:"rid"`
 }
 
+// PostNodeActionRegisterRequest defines model for PostNodeActionRegisterRequest.
+type PostNodeActionRegisterRequest struct {
+	// App register the node in this app. Without it, the node app keyword is used, or the collector picks an app owned by the user.
+	App *string `json:"app,omitempty"`
+
+	// Password the collector user password
+	Password *string `json:"password,omitempty"`
+
+	// User the collector user to authenticate as. Without it, the node registers with the id it already holds.
+	User *string `json:"user,omitempty"`
+}
+
 // PostNodeDRBDConfigRequest defines model for PostNodeDRBDConfigRequest.
 type PostNodeDRBDConfigRequest struct {
 	AllocationID openapi_types.UUID `json:"allocation_id"`
@@ -2176,7 +2234,11 @@ type PostObjectActionRestart struct {
 // PostObjectActionSwitch defines model for PostObjectActionSwitch.
 type PostObjectActionSwitch struct {
 	Destination []string `json:"destination"`
-	Live        bool     `json:"live"`
+
+	// InterruptSyncs End the syncs running on the instance stopped before stopping
+	// it, instead of waiting for them to end.
+	InterruptSyncs *bool `json:"interrupt_syncs,omitempty"`
+	Live           bool  `json:"live"`
 }
 
 // PostPoolClaim defines model for PostPoolClaim.
@@ -2481,15 +2543,15 @@ type SANPathTarget struct {
 
 // Schedule defines model for Schedule.
 type Schedule struct {
-	Action             string    `json:"action"`
-	Key                string    `json:"key"`
-	LastRunAt          time.Time `json:"last_run_at"`
-	MaxParallel        int       `json:"max_parallel"`
-	NextRunAt          time.Time `json:"next_run_at"`
-	Require            string    `json:"require"`
-	RequireCollector   bool      `json:"require_collector"`
-	RequireProvisioned bool      `json:"require_provisioned"`
-	Schedule           string    `json:"schedule"`
+	Action             string     `json:"action"`
+	Key                string     `json:"key"`
+	LastRunAt          *time.Time `json:"last_run_at"`
+	MaxParallel        int        `json:"max_parallel"`
+	NextRunAt          *time.Time `json:"next_run_at"`
+	Require            string     `json:"require"`
+	RequireCollector   bool       `json:"require_collector"`
+	RequireProvisioned bool       `json:"require_provisioned"`
+	Schedule           string     `json:"schedule"`
 }
 
 // ScheduleConfig defines model for ScheduleConfig.
@@ -2743,6 +2805,9 @@ type InQueryHBA = string
 
 // InQueryImpersonate The node name to impersonate when evaluating a keyword. Setting impersonate without evaluate=true returns a Bad Request error.
 type InQueryImpersonate = string
+
+// InQueryInterruptSyncs defines model for inQueryInterruptSyncs.
+type InQueryInterruptSyncs = bool
 
 // InQueryKeyFilter defines model for inQueryKeyFilter.
 type InQueryKeyFilter = string
@@ -3026,6 +3091,11 @@ type PostNodeActionPushDiskParams struct {
 
 // PostNodeActionPushPkgParams defines parameters for PostNodeActionPushPkg.
 type PostNodeActionPushPkgParams struct {
+	SessionID *SessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
+}
+
+// PostNodeActionRegisterParams defines parameters for PostNodeActionRegister.
+type PostNodeActionRegisterParams struct {
 	SessionID *SessionID `form:"session_id,omitempty" json:"session_id,omitempty"`
 }
 
@@ -3759,11 +3829,15 @@ type PostInstanceActionStatusParams struct {
 
 // PostInstanceActionStopParams defines parameters for PostInstanceActionStop.
 type PostInstanceActionStopParams struct {
-	Slaves    *InQueryAllSlaves `form:"slaves,omitempty" json:"slaves,omitempty"`
-	Force     *InQueryForce     `form:"force,omitempty" json:"force,omitempty"`
-	Master    *InQueryMaster    `form:"master,omitempty" json:"master,omitempty"`
-	MoveTo    *InQueryMoveTo    `form:"move-to,omitempty" json:"move-to,omitempty"`
-	SessionID *SessionID        `form:"session_id,omitempty" json:"session_id,omitempty"`
+	Slaves *InQueryAllSlaves `form:"slaves,omitempty" json:"slaves,omitempty"`
+	Force  *InQueryForce     `form:"force,omitempty" json:"force,omitempty"`
+
+	// InterruptSyncs End the syncs running on the instance before stopping it, instead of
+	// waiting for them to end.
+	InterruptSyncs *InQueryInterruptSyncs `form:"interrupt_syncs,omitempty" json:"interrupt_syncs,omitempty"`
+	Master         *InQueryMaster         `form:"master,omitempty" json:"master,omitempty"`
+	MoveTo         *InQueryMoveTo         `form:"move-to,omitempty" json:"move-to,omitempty"`
+	SessionID      *SessionID             `form:"session_id,omitempty" json:"session_id,omitempty"`
 
 	// Rid a resource selector expression
 	Rid    *InQueryRid    `form:"rid,omitempty" json:"rid,omitempty"`
@@ -3958,6 +4032,25 @@ type PostSvcEnableParams struct {
 	Tag    *InQueryTag    `form:"tag,omitempty" json:"tag,omitempty"`
 }
 
+// PostObjectActionCapParams defines parameters for PostObjectActionCap.
+type PostObjectActionCapParams struct {
+	Set *InQuerySets `form:"set,omitempty" json:"set,omitempty"`
+
+	// ConfigUpdatedAt Refuse the action unless the instance configuration on the node running
+	// it is at least as recent as this timestamp, answering 409 Conflict when
+	// it is older.
+	//
+	// A configuration write answers with the timestamp it produced, in the
+	// OM-Last-Modified header, and a write reaches the peer nodes a moment
+	// after it is acknowledged. Passing that timestamp back here is how a
+	// client that wrote a configuration and then acts on it makes sure every
+	// instance acts on what it wrote, rather than on what it is replacing.
+	//
+	// Optional. Without it the action runs on whatever configuration the node
+	// holds.
+	ConfigUpdatedAt *ConfigUpdatedAt `form:"config_updated_at,omitempty" json:"config_updated_at,omitempty"`
+}
+
 // PostObjectActionResizeParams defines parameters for PostObjectActionResize.
 type PostObjectActionResizeParams struct {
 	// ConfigUpdatedAt Refuse the action unless the instance configuration on the node running
@@ -3975,6 +4068,13 @@ type PostObjectActionResizeParams struct {
 	ConfigUpdatedAt *ConfigUpdatedAt `form:"config_updated_at,omitempty" json:"config_updated_at,omitempty"`
 }
 
+// PostObjectActionStopParams defines parameters for PostObjectActionStop.
+type PostObjectActionStopParams struct {
+	// InterruptSyncs End the syncs running on the instance before stopping it, instead of
+	// waiting for them to end.
+	InterruptSyncs *InQueryInterruptSyncs `form:"interrupt_syncs,omitempty" json:"interrupt_syncs,omitempty"`
+}
+
 // GetObjectConfigParams defines parameters for GetObjectConfig.
 type GetObjectConfigParams struct {
 	Evaluate    *InQueryEvaluate    `form:"evaluate,omitempty" json:"evaluate,omitempty"`
@@ -3987,12 +4087,51 @@ type PatchObjectConfigParams struct {
 	Delete *InQueryDeletes `form:"delete,omitempty" json:"delete,omitempty"`
 	Unset  *InQueryUnsets  `form:"unset,omitempty" json:"unset,omitempty"`
 	Set    *InQuerySets    `form:"set,omitempty" json:"set,omitempty"`
+
+	// Wait How long to hold the request until what it asks about has ended.
+	//
+	// Without it the answer is what is known now. With it the request is
+	// held, and answered as soon as the thing ends, so a client waiting for
+	// the end of what it submitted neither polls nor holds an event stream
+	// open for it.
+	//
+	// A request held until the wait expires is answered 408, which says the
+	// thing is still running, and is not an error of the request.
+	Wait *Wait `form:"wait,omitempty" json:"wait,omitempty"`
 }
 
 // GetObjectConfigFileParams defines parameters for GetObjectConfigFile.
 type GetObjectConfigFileParams struct {
 	// RedactSecrets if true, redact secrets in the configuration file
 	RedactSecrets *RedactSecrets `form:"redact-secrets,omitempty" json:"redact-secrets,omitempty"`
+}
+
+// PostObjectConfigFileParams defines parameters for PostObjectConfigFile.
+type PostObjectConfigFileParams struct {
+	// Wait How long to hold the request until what it asks about has ended.
+	//
+	// Without it the answer is what is known now. With it the request is
+	// held, and answered as soon as the thing ends, so a client waiting for
+	// the end of what it submitted neither polls nor holds an event stream
+	// open for it.
+	//
+	// A request held until the wait expires is answered 408, which says the
+	// thing is still running, and is not an error of the request.
+	Wait *Wait `form:"wait,omitempty" json:"wait,omitempty"`
+}
+
+// PutObjectConfigFileParams defines parameters for PutObjectConfigFile.
+type PutObjectConfigFileParams struct {
+	// Wait How long to hold the request until what it asks about has ended.
+	//
+	// Without it the answer is what is known now. With it the request is
+	// held, and answered as soon as the thing ends, so a client waiting for
+	// the end of what it submitted neither polls nor holds an event stream
+	// open for it.
+	//
+	// A request held until the wait expires is answered 408, which says the
+	// thing is still running, and is not an error of the request.
+	Wait *Wait `form:"wait,omitempty" json:"wait,omitempty"`
 }
 
 // GetObjectConfigKeywordsParams defines parameters for GetObjectConfigKeywords.
@@ -4092,6 +4231,12 @@ type PostClusterEnrollJSONRequestBody = ClusterEnrollBody
 // PostClusterEvictJSONRequestBody defines body for PostClusterEvict for application/json ContentType.
 type PostClusterEvictJSONRequestBody = ClusterEvictBody
 
+// PostClusterRegisterJSONRequestBody defines body for PostClusterRegister for application/json ContentType.
+type PostClusterRegisterJSONRequestBody = ClusterRegisterBody
+
+// PostComputeClaimJSONRequestBody defines body for PostComputeClaim for application/json ContentType.
+type PostComputeClaimJSONRequestBody = PostComputeClaim
+
 // PostInstanceProgressJSONRequestBody defines body for PostInstanceProgress for application/json ContentType.
 type PostInstanceProgressJSONRequestBody = PostInstanceProgress
 
@@ -4100,6 +4245,9 @@ type PostInstanceStatusJSONRequestBody = InstanceStatus
 
 // PostNetworkClaimJSONRequestBody defines body for PostNetworkClaim for application/json ContentType.
 type PostNetworkClaimJSONRequestBody = PostNetworkClaim
+
+// PostNodeActionRegisterJSONRequestBody defines body for PostNodeActionRegister for application/json ContentType.
+type PostNodeActionRegisterJSONRequestBody = PostNodeActionRegisterRequest
 
 // PostDaemonJoinJSONRequestBody defines body for PostDaemonJoin for application/json ContentType.
 type PostDaemonJoinJSONRequestBody = DaemonJoinBody

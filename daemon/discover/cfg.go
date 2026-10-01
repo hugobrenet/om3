@@ -19,6 +19,8 @@ import (
 	"github.com/opensvc/om3/v3/core/object"
 	"github.com/opensvc/om3/v3/core/rawconfig"
 	"github.com/opensvc/om3/v3/core/resourceid"
+	"github.com/opensvc/om3/v3/core/xconfig"
+	"github.com/opensvc/om3/v3/daemon/configannounce"
 	"github.com/opensvc/om3/v3/daemon/daemonauth"
 	"github.com/opensvc/om3/v3/daemon/daemonenv"
 	"github.com/opensvc/om3/v3/daemon/daemonsubsystem"
@@ -162,12 +164,20 @@ func (t *Manager) onInstanceStatusUpdated(c *msgbus.InstanceStatusUpdated) {
 		}
 		return true
 	}
+	// watch watches the run directory of a resource, making it when it is
+	// missing: the first run of the resource would make it otherwise, and
+	// that run would go unseen, the directory being watched only from the
+	// status update following it.
 	watch := func(runDir string) {
 		if _, ok := prevWatched[runDir]; ok {
 			watched[runDir] = nil
-		} else if err := t.fsWatcher.Add(runDir); errors.Is(err, os.ErrNotExist) {
-			t.log.Tracef("fs: skip dir watch %s: does not exist yet", runDir)
-		} else if err != nil {
+			return
+		}
+		if err := os.MkdirAll(runDir, 0755); err != nil {
+			t.log.Warnf("fs: failed to make the run dir %s: %s", runDir, err)
+			return
+		}
+		if err := t.fsWatcher.Add(runDir); err != nil {
 			t.log.Warnf("fs: failed to add dir watch %s: %s", runDir, err)
 		} else {
 			t.log.Infof("fs: add dir watch %s", runDir)
@@ -533,7 +543,12 @@ func (t *Manager) onInstanceConfigFor(c *msgbus.InstanceConfigFor) {
 		}
 	}
 
-	if _, ok := t.cfgMTime[pathS]; ok {
+	// The running icfg must not recover the local file when it ends, as the
+	// file is foreign: ours, out of its scope, or a peer's not for us, that
+	// is removed. A peer's configuration for us is fetched, and a local
+	// file removed meanwhile is recovered from it: a stale flag would keep
+	// a later removal from being recovered.
+	if _, ok := t.cfgMTime[pathS]; ok && (c.Node == t.localhost || !inList(t.localhost, c.Scope)) {
 		t.disableRecover[c.Path] = c.UpdatedAt
 	}
 
@@ -662,18 +677,20 @@ func (t *Manager) onRemoteConfigFetched(c *msgbus.RemoteFileConfig) {
 			c.Err <- err
 			return
 		}
-		if err := os.Rename(c.File, confFile); err != nil {
+		// Installed under the lock every writer of the file takes, so a
+		// local write checked against the file this replaces does not land
+		// over it, and the file is synced to stable storage, so a reboot
+		// does not find it absent or empty.
+		if err := xconfig.InstallFile(c.File, confFile); err != nil {
 			log.Errorf("cfg: can't install %s config fetched from node %s to %s: %s", c.Path, c.Node, confFile, err)
 			c.Err <- err
 		} else {
-			// Prevents from absent or empty config on reboot before the config file is
-			// synched to stable storage.
-			if err := file.Sync(confFile); err != nil {
-				log.Errorf("cfg: can't install %s config fetched from node %s to %s sync: %s", c.Path, c.Node, confFile, err)
-				c.Err <- err
-				return
-			}
 			log.Infof("cfg: install %s config fetched from node %s", c.Path, c.Node)
+			// Said now rather than by the filesystem watcher, which
+			// debounces the events of a file for 200ms: the node that wrote
+			// the configuration waits for this one to report it installed.
+			// The watcher does not say it again: see configannounce.
+			configannounce.Written(t.publisher, c.Path)
 		}
 		c.Err <- nil
 	}
