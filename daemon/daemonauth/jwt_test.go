@@ -154,6 +154,42 @@ func TestCreateTokenWithoutASignKey(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestCreateTokenSignsClusterID(t *testing.T) {
+	key := testKey(t)
+	previous := jwtSignKey.Load()
+	jwtSignKey.Store(key)
+	t.Cleanup(func() { jwtSignKey.Store(previous) })
+	token, expiresAt, err := (&JWTCreator{}).CreateToken(time.Minute, map[string]any{
+		"sub":        "alice",
+		"iss":        "node1",
+		"cluster_id": "00000000-0000-4000-8000-000000000001",
+		TkUseClaim:   TkUseAccess,
+		"grant":      []string{"guest:system"},
+	})
+	require.NoError(t, err)
+	claims := jwt.MapClaims{}
+	parsed, err := jwt.ParseWithClaims(token, claims, func(*jwt.Token) (any, error) {
+		return &key.PublicKey, nil
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodRS256.Alg()}), jwt.WithExpirationRequired())
+	require.NoError(t, err)
+	assert.True(t, parsed.Valid)
+	assert.Equal(t, "00000000-0000-4000-8000-000000000001", claims["cluster_id"])
+	assert.Equal(t, "node1", claims["iss"])
+	assert.Equal(t, "alice", claims["sub"])
+	assert.Equal(t, TkUseAccess, claims[TkUseClaim])
+	exp, err := claims.GetExpirationTime()
+	require.NoError(t, err)
+	assert.Equal(t, expiresAt.Unix(), exp.Unix())
+
+	strategy := &jwtStrategy{verifyKey: &key.PublicKey}
+	info, err := strategy.Authenticate(context.Background(), bearerRequest(t, token))
+	require.NoError(t, err)
+	assert.Equal(t, "alice", info.Username)
+	assert.Equal(t, "node1", info.Issuer)
+	assert.Equal(t, TkUseAccess, info.TokenUse)
+	assert.Equal(t, []string{"guest:system"}, info.Grants)
+}
+
 func TestCreateNodeTokenIsAcceptedByTheJWTStrategy(t *testing.T) {
 	authCache = newCache()
 	key := testKey(t)
