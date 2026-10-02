@@ -2,6 +2,8 @@ package ai
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,16 +12,17 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
 )
 
 const (
-	defaultSocketPath       = "/run/opensvc-ai-agent/agent.sock"
-	unixBaseURL             = "http://127.0.0.1"
-	socketPathEnv           = "OPENSVC_AI_AGENT_SOCKET"
-	maximumUnixPathBytes    = 107
+	DefaultAgentURL         = "https://ai-agent.opensvc.com"
+	agentURLEnv             = "OPENSVC_AI_AGENT_URL"
+	agentCAFileEnv          = "OPENSVC_AI_AGENT_CA_FILE"
+	maxCAFileBytes          = 1 << 20
 	maxErrorBodyBytes       = 64 << 10
 	maxErrorCodeRunes       = 128
 	maxErrorMessageRunes    = 2048
@@ -53,47 +56,92 @@ func (e *APIError) Error() string {
 }
 
 func New() (*Client, error) {
-	socketPath := strings.TrimSpace(os.Getenv(socketPathEnv))
-	if socketPath == "" {
-		socketPath = defaultSocketPath
+	baseURL := strings.TrimSpace(os.Getenv(agentURLEnv))
+	if baseURL == "" {
+		baseURL = DefaultAgentURL
 	}
-	return newUnixClient(socketPath)
+	return newHTTPSClient(baseURL, strings.TrimSpace(os.Getenv(agentCAFileEnv)))
 }
 
-func newUnixClient(socketPath string) (*Client, error) {
-	path, err := cleanUnixSocketPath(socketPath)
+func newHTTPSClient(baseURL string, caFile string) (*Client, error) {
+	parsed, err := parseAgentURL(baseURL)
 	if err != nil {
-		return nil, fmt.Errorf("parse ai agent Unix socket path: %w", err)
+		return nil, err
 	}
-	parsed, err := url.Parse(unixBaseURL)
+	roots, err := loadAgentCA(caFile)
 	if err != nil {
-		return nil, fmt.Errorf("parse internal ai agent URL: %w", err)
+		return nil, err
 	}
 	dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
-	transport.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return dialer.DialContext(ctx, "unix", path)
-	}
-	httpClient := &http.Client{Transport: transport}
+	transport.DialContext = dialer.DialContext
+	transport.TLSClientConfig = &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots}
+	httpClient := &http.Client{Transport: agentOriginTransport{
+		base:   transport,
+		origin: parsed.Scheme + "://" + parsed.Host,
+	}}
 	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error {
 		return http.ErrUseLastResponse
 	}
 	return &Client{baseURL: parsed, httpClient: httpClient}, nil
 }
 
-func cleanUnixSocketPath(value string) (string, error) {
-	path := filepath.Clean(strings.TrimSpace(value))
-	if !filepath.IsAbs(path) {
-		return "", fmt.Errorf("path must be absolute")
+func parseAgentURL(value string) (*url.URL, error) {
+	parsed, err := url.Parse(strings.TrimSpace(value))
+	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.Opaque != "" {
+		return nil, fmt.Errorf("ai agent URL must be an absolute HTTPS URL")
 	}
-	if path == string(filepath.Separator) {
-		return "", fmt.Errorf("path must name a socket")
+	if (parsed.Path != "" && parsed.Path != "/") || parsed.RawPath != "" || parsed.User != nil || parsed.RawQuery != "" || parsed.ForceQuery || parsed.Fragment != "" || parsed.RawFragment != "" {
+		return nil, fmt.Errorf("ai agent URL must not contain a path, credentials, query or fragment")
 	}
-	if len([]byte(path)) > maximumUnixPathBytes {
-		return "", fmt.Errorf("path exceeds the Linux Unix socket limit of %d bytes", maximumUnixPathBytes)
+	if parsed.Port() != "" {
+		port, err := strconv.Atoi(parsed.Port())
+		if err != nil || port < 1 || port > 65535 {
+			return nil, fmt.Errorf("ai agent URL port must be between 1 and 65535")
+		}
+	} else if strings.HasSuffix(parsed.Host, ":") {
+		return nil, fmt.Errorf("ai agent URL port is empty")
 	}
-	return path, nil
+	parsed.Path = ""
+	return parsed, nil
+}
+
+// An explicit CA bundle replaces system roots; an empty path uses system roots.
+func loadAgentCA(caFile string) (*x509.CertPool, error) {
+	if caFile == "" {
+		return nil, nil
+	}
+	path := filepath.Clean(caFile)
+	if !filepath.IsAbs(path) || path == string(filepath.Separator) {
+		return nil, fmt.Errorf("ai agent CA file must be an absolute file path")
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("open ai agent CA file: %w", err)
+	}
+	defer file.Close()
+	data, err := io.ReadAll(io.LimitReader(file, maxCAFileBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read ai agent CA file: %w", err)
+	}
+	roots := x509.NewCertPool()
+	if len(data) > maxCAFileBytes || !roots.AppendCertsFromPEM(data) {
+		return nil, fmt.Errorf("ai agent CA file must contain PEM certificates and be at most 1 MiB")
+	}
+	return roots, nil
+}
+
+type agentOriginTransport struct {
+	base   http.RoundTripper
+	origin string
+}
+
+func (t agentOriginTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	if request.URL.Scheme+"://"+request.URL.Host != t.origin || (request.Host != "" && request.Host != request.URL.Host) {
+		return nil, fmt.Errorf("ai agent request destination differs from configured HTTPS origin")
+	}
+	return t.base.RoundTrip(request)
 }
 
 func (c *Client) endpoint(path string) string {

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"syscall"
 
+	clientai "github.com/opensvc/om3/v3/core/client/ai"
 	"github.com/opensvc/om3/v3/core/commoncmd"
 	"github.com/opensvc/om3/v3/core/omcmd"
 	"github.com/spf13/cobra"
@@ -20,8 +21,8 @@ func newCmdAI() *cobra.Command {
 	cmd := &cobra.Command{
 		GroupID: commoncmd.GroupIDSubsystems,
 		Use:     "ai",
-		Short:   "interact with the local OpenSVC AI agent",
-		Long: `Interact with the local OpenSVC AI agent.
+		Short:   "interact with the OpenSVC AI agent",
+		Long: `Interact with the OpenSVC AI agent.
 
 The ask command submits one non-persistent prompt. The list, show, rename, and
 delete commands manage persistent conversations owned by the authenticated
@@ -30,8 +31,13 @@ conversation. The show command returns conversation metadata only;
 conversation messages are not exposed by the agent API. Conversations expire
 automatically.
 
-The agent is local to the node. By default, the client connects to
-/run/opensvc-ai-agent/agent.sock. OPENSVC_AI_AGENT_SOCKET overrides that path.`,
+The agent is reached over HTTPS on TCP. By default, the client connects to
+` + clientai.DefaultAgentURL + `. OPENSVC_AI_AGENT_URL overrides that address.
+OPENSVC_AI_AGENT_CA_FILE optionally selects a PEM CA bundle for a private TLS
+certificate; otherwise system roots are used. Certificates and hostnames are
+always verified. The URL must not contain a path, credentials, query or fragment.
+There is no local or Unix-socket fallback. OpenSVC access tokens are still
+issued by the daemon; no new OAuth login is introduced.`,
 		Example: `  om ai ask "Assess the health of my cluster"
   om ai chat
   om ai chat --resume
@@ -112,7 +118,7 @@ func newCmdAIAsk() *cobra.Command {
 	}
 	cmd := &cobra.Command{
 		Use:   "ask PROMPT",
-		Short: "submit one prompt to the local OpenSVC AI agent",
+		Short: "submit one prompt to the OpenSVC AI agent",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			options.Prompt = strings.Join(args, " ")

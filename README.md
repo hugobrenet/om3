@@ -36,6 +36,33 @@ Then open an `ox` session and watch it move around the cluster.
 Browse [ready-to-use templates](https://github.com/opensvc/opensvc_templates) — VIPs,
 cluster DNS, ingress gateways, ACME, HA NFS, meshed VPN backend networks, and more.
 
+## AI client
+
+`om ai` obtains a short-lived OpenSVC access JWT from the daemon and contacts
+the independent AI agent over HTTPS on TCP. The default remote endpoint is
+`https://ai-agent.opensvc.com` (port 443). Provision this DNS name and HTTPS
+service, or select your deployment with `OPENSVC_AI_AGENT_URL`:
+
+```bash
+export OPENSVC_AI_AGENT_URL=https://agent.example.com:8090
+om ai ask "Assess the health of my cluster"
+om ai chat
+om ai list
+```
+
+The URL must be an HTTPS origin: no credentials, path, query or fragment.
+Certificate chain and hostname verification are mandatory, with TLS 1.2 or
+newer. Public certificates use system roots. For a private TLS CA, optionally
+set `OPENSVC_AI_AGENT_CA_FILE` to an absolute path to a PEM CA bundle (maximum
+1 MiB); this bundle replaces system roots for the agent connection. This
+setting controls TLS trust, not JWT signature validation.
+
+There is no localhost or Unix-socket fallback, no insecure TLS mode, and no
+proxy or redirect forwarding. The daemon connection used to obtain the JWT is
+unchanged; this migration does not add OAuth login, provider credentials, or
+multi-cluster routing. The agent must still trust the target cluster's public
+JWT signing key.
+
 ## Docker Image Signing
 
 All OpenSVC Docker images published to `ghcr.io/opensvc` are signed with [Cosign](https://docs.sigstore.dev/cosign/) using Sigstore's keyless signing via GitHub Actions OIDC. The signing is performed automatically by the [release workflow](.github/workflows/release-go-docker-push-version.yml) on Git tag creation.
