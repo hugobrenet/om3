@@ -13,10 +13,15 @@ const (
 	FeedInstanceResinfo = "/api/instance/resource_info"
 	FeedInstanceStatus  = "/api/instance/status"
 
-	FeedNodeDisk   = "/api/node/disk"
-	FeedNodeSystem = "/api/node/system"
+	FeedNodeChecks    = "/api/node/checks"
+	FeedNodeDisk      = "/api/node/disk"
+	FeedNodeStats     = "/api/node/stats"
+	FeedNodeSysreport = "/api/node/sysreport"
+	FeedNodeSystem    = "/api/node/system"
 
 	FeedObjectConfig = "/api/object/config"
+
+	FeedSANSwitch = "/api/sanswitch"
 
 	FeedVersion = "/api/version"
 )

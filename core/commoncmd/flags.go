@@ -57,6 +57,7 @@ func FlagsAsync(flags *pflag.FlagSet, p *OptsAsync) {
 	FlagTime(flags, &p.Time)
 	FlagWait(flags, &p.Wait)
 	FlagWatch(flags, &p.Watch)
+	FlagFollow(flags, &p.Follow)
 }
 
 func FlagsLogs(flags *pflag.FlagSet, p *OptsLogs) {
@@ -279,11 +280,17 @@ func FlagKeyTo(flags *pflag.FlagSet, p *string) {
 }
 
 func FlagKeyword(flags *pflag.FlagSet, p *string) {
-	flags.StringVar(p, "kw", "", "a configuration keyword: [<section>.]<option>")
+	flags.StringVar(p, "kw", "", "a configuration keyword: [<section>.]<option>, the option a pattern matching several, as task#1.sched*")
 }
 
 func FlagKeywordOps(flags *pflag.FlagSet, p *[]string) {
 	RawStringSliceVar(flags, p, "kw", []string{}, "a configuration keyword operation: [<section>.]<option><op><value>, with op in = |= += -= ^=")
+}
+
+// FlagKeywordSelection declares the --kw of the commands reading keywords,
+// which take patterns: see configkeywords.IsPattern.
+func FlagKeywordSelection(flags *pflag.FlagSet, p *[]string) {
+	RawStringSliceVar(flags, p, "kw", []string{}, "a configuration keyword: [<section>.]<option>. A driver group or a pattern as section, as container or cont*, matches the resources it names, and a pattern as option, as stop_*, the keywords of the section, set or not")
 }
 
 func FlagKeywords(flags *pflag.FlagSet, p *[]string) {
@@ -699,6 +706,13 @@ func FlagWait(flags *pflag.FlagSet, p *bool) {
 
 func FlagWatch(flags *pflag.FlagSet, p *bool) {
 	flags.BoolVarP(p, "watch", "w", false, "watch the monitor changes")
+}
+
+// FlagFollow is the follow flag of an action asked of daemons, which streams
+// its logs: the logs of its session for an action asked of the daemons of
+// nodes, of its orchestration for a target state.
+func FlagFollow(flags *pflag.FlagSet, p *bool) {
+	flags.BoolVarP(p, "follow", "f", false, "follow the logs of the action until it ends, rather than show the ids it was accepted as")
 }
 
 func FlagColor(flags *pflag.FlagSet, p *string) {

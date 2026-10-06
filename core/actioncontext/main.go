@@ -310,6 +310,12 @@ func Props(ctx context.Context) Properties {
 	return ctx.Value(propsKey).(Properties)
 }
 
+// HasProps tells whether the context carries the properties of an action.
+func HasProps(ctx context.Context) bool {
+	_, ok := ctx.Value(propsKey).(Properties)
+	return ok
+}
+
 // IsStep tells whether the action of the context is a step of another
 // action, which flags nothing stopped on purpose.
 func IsStep(ctx context.Context) bool {
@@ -343,4 +349,19 @@ func IsActionForMaster(ctx context.Context) bool {
 
 func HasResourceSelector(ctx context.Context) bool {
 	return RID(ctx) != "" || Tag(ctx) != "" || Subset(ctx) != "" || To(ctx) != ""
+}
+
+// WithoutResourceSelector returns the context of an action a resource runs on
+// another object, as a volume resource does on its vol object. The resource
+// selector of the action names resources of the object it runs on, so it
+// must not select among the resources of the other object, which the
+// resource acts on as a whole.
+func WithoutResourceSelector(ctx context.Context) context.Context {
+	if !HasResourceSelector(ctx) {
+		return ctx
+	}
+	ctx = WithRID(ctx, "")
+	ctx = WithTag(ctx, "")
+	ctx = WithSubset(ctx, "")
+	return WithTo(ctx, "")
 }

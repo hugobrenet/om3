@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -221,6 +222,34 @@ func (t *T) startHbRx(hb hbcfg.Confer) error {
 	return nil
 }
 
+// knownRids returns the heartbeats this manager knows of: the ones recorded
+// as started from their configuration, and the ones running, sorted.
+func (t *T) knownRids() []string {
+	m := make(map[string]bool)
+	for rid := range t.ridSignature {
+		m[rid] = true
+	}
+	for rid := range t.txs {
+		m[rid] = true
+	}
+	for rid := range t.rxs {
+		m[rid] = true
+	}
+	l := make([]string, 0, len(m))
+	for rid := range m {
+		l = append(l, rid)
+	}
+	sort.Strings(l)
+	return l
+}
+
+// isRunningRid says whether a tx or an rx of the heartbeat runs.
+func (t *T) isRunningRid(rid string) bool {
+	_, tx := t.txs[rid]
+	_, rx := t.rxs[rid]
+	return tx || rx
+}
+
 func (t *T) stopHbRid(rid string) error {
 	errCount := 0
 	failures := make([]string, 0)
@@ -264,7 +293,13 @@ func (t *T) rescanHb(ctx context.Context) error {
 		ridSignatureNew[rid] = hb.Signature()
 	}
 
-	for rid := range t.ridSignature {
+	// A heartbeat whose start failed is not recorded, so a later rescan
+	// tries it again, and "om daemon hb restart" can start it meanwhile. The
+	// running ones are stopped too when their configuration goes away: only
+	// the recorded ones were, and a heartbeat started by a restart after a
+	// failed start ran on, its configuration deleted, until the daemon
+	// stopped.
+	for _, rid := range t.knownRids() {
 		if _, ok := ridSignatureNew[rid]; ok {
 			continue
 		}
@@ -298,6 +333,15 @@ func (t *T) rescanHb(ctx context.Context) error {
 	}
 	for rid, newSig := range ridSignatureNew {
 		if _, ok := t.ridSignature[rid]; !ok {
+			if t.isRunningRid(rid) {
+				// Started by a restart after its start failed: it
+				// is started again from the configuration, rather
+				// than a second time beside itself.
+				if err := t.stopHbRid(rid); err != nil {
+					errs = errors.Join(errs, err)
+					continue
+				}
+			}
 			t.log.Infof("heartbeat config new %s => starting", rid)
 			if err := t.startHb(ridHb[rid]); err != nil {
 				errs = errors.Join(errs, err)
@@ -432,8 +476,13 @@ func (t *T) msgFromRx(ctx context.Context) {
 			}
 		case msg := <-t.readMsgQueue:
 			peer := msg.Nodename
-			if msgTimes[peer].Equal(msg.UpdatedAt) {
+			last := msgTimes[peer]
+			if last.Equal(msg.UpdatedAt) {
 				t.log.Tracef("msgFromRx: drop already processed msg %s from %s gens: %v", msg.Kind, msg.Nodename, msg.Gen)
+				continue
+			}
+			if isStaleMsg(msg.UpdatedAt, last) {
+				t.log.Debugf("msgFromRx: drop msg %s from %s gens: %v older than the last processed by %s", msg.Kind, msg.Nodename, msg.Gen, last.Sub(msg.UpdatedAt))
 				continue
 			}
 			select {
@@ -447,6 +496,31 @@ func (t *T) msgFromRx(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// staleMsgMaxAge is the age, relative to the last message processed from a
+// peer, below which an older message of that peer is dropped as stale.
+//
+// It covers the heartbeat timeouts: a slow heartbeat, as a disk or a relay
+// one, can deliver a message of a peer after a faster one delivered later
+// ones, as on its first read after this daemon started, and its receiver no
+// longer delivers a message older than its timeout. A message older still is
+// taken for one of a peer whose clock was stepped back, and processed, so a
+// clock stepped back costs at most this long of dropped messages.
+const staleMsgMaxAge = 2 * time.Minute
+
+// isStaleMsg tells whether a peer message stamped updated is older than the
+// last message processed from that peer, stamped last, by less than
+// staleMsgMaxAge.
+//
+// Processing such a message would set back what this node knows of the peer,
+// its gens first: the peer would be asked a full message again, and this node
+// would stay in full message type, for a state already superseded.
+func isStaleMsg(updated, last time.Time) bool {
+	if last.IsZero() || !updated.Before(last) {
+		return false
+	}
+	return last.Sub(updated) < staleMsgMaxAge
 }
 
 // janitor starts the goroutine responsible for hb drivers lifecycle.

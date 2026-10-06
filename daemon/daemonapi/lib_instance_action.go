@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/opensvc/om3/v3/daemon/proc"
+	"github.com/opensvc/om3/v3/daemon/session"
 
 	"github.com/opensvc/om3/v3/core/env"
 	"github.com/opensvc/om3/v3/core/naming"
@@ -35,6 +36,10 @@ func (a *DaemonAPI) apiExec(ctx echo.Context, p naming.Path, requesterSessionID 
 	}
 	sessionID := xsession.NewSessionID(requesterSessionID)
 	execID := xsession.NewExecID()
+	// The exec is part of the session of its requester, which follows its
+	// logs by that id: a command logging nothing, as a node push, shows
+	// at least its start and its end.
+	log = log.Attr("session_id", sessionID.String())
 	cmd := command.New(
 		command.WithName(execname),
 		command.WithArgs(args),
@@ -66,6 +71,23 @@ func (a *DaemonAPI) apiExec(ctx echo.Context, p naming.Path, requesterSessionID 
 		StartedAt: startTime,
 	}
 	a.Bus.Pub(&msg, labels...)
+	// The exec store records the exec from the message too, but later, when
+	// its manager reads it: recorded now, the exec id answered is known to a
+	// client asking about it at once, so an id the store does not know is
+	// one it dropped, or never had.
+	path := ""
+	if !p.IsZero() {
+		path = p.String()
+	}
+	session.AddExec(session.Exec{
+		SessionID: session.IDString(sessionID),
+		ExecID:    session.IDString(execID),
+		Node:      a.localhost,
+		Path:      path,
+		Origin:    "api",
+		StartedAt: startTime,
+		Command:   cmd.String(),
+	})
 	if err = cmd.Start(); err != nil {
 		// The start of this exec was announced, so its end has to be too, or
 		// it stays running in the exec store for as long as the store keeps
@@ -88,9 +110,9 @@ func (a *DaemonAPI) apiExec(ctx echo.Context, p naming.Path, requesterSessionID 
 	go func() {
 		err := cmd.Wait()
 		proc.Unregister(pid)
-		log.Infof("<- exec %s", cmd)
 		duration := time.Now().Sub(startTime)
 		if err != nil {
+			log.Errorf("<- exec %s: %s", cmd, err)
 			msg := msgbus.ExecFailed{
 				Command:   cmd.String(),
 				Duration:  duration,
@@ -103,6 +125,7 @@ func (a *DaemonAPI) apiExec(ctx echo.Context, p naming.Path, requesterSessionID 
 			}
 			a.Bus.Pub(&msg, labels...)
 		} else {
+			log.Infof("<- exec %s", cmd)
 			msg := msgbus.ExecSuccess{
 				Command:   cmd.String(),
 				Duration:  duration,

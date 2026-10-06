@@ -299,7 +299,7 @@ type ClientInterface interface {
 	PostDaemonHeartbeatStop(ctx context.Context, nodename InPathNodeName, name InPathHeartbeatName, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// PostDaemonHeartbeatWipe request
-	PostDaemonHeartbeatWipe(ctx context.Context, nodename InPathNodeName, name InPathHeartbeatName, reqEditors ...RequestEditorFn) (*http.Response, error)
+	PostDaemonHeartbeatWipe(ctx context.Context, nodename InPathNodeName, name InPathHeartbeatName, params *PostDaemonHeartbeatWipeParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// PostDaemonListenerRestart request
 	PostDaemonListenerRestart(ctx context.Context, nodename InPathNodeName, name InPathListenerName, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -368,6 +368,9 @@ type ClientInterface interface {
 	// PostInstanceActionIngest request
 	PostInstanceActionIngest(ctx context.Context, nodename InPathNodeName, namespace InPathNamespace, kind InPathKind, name InPathName, params *PostInstanceActionIngestParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// PostInstanceActionInstall request
+	PostInstanceActionInstall(ctx context.Context, nodename InPathNodeName, namespace InPathNamespace, kind InPathKind, name InPathName, params *PostInstanceActionInstallParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// PostInstanceActionPGReset request
 	PostInstanceActionPGReset(ctx context.Context, nodename InPathNodeName, namespace InPathNamespace, kind InPathKind, name InPathName, params *PostInstanceActionPGResetParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -421,6 +424,11 @@ type ClientInterface interface {
 
 	// PostInstanceClear request
 	PostInstanceClear(ctx context.Context, nodename InPathNodeName, namespace InPathNamespace, kind InPathKind, name InPathName, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PostInstanceCollectorActionWithBody request with any body
+	PostInstanceCollectorActionWithBody(ctx context.Context, nodename InPathNodeName, namespace InPathNamespace, kind InPathKind, name InPathName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	PostInstanceCollectorAction(ctx context.Context, nodename InPathNodeName, namespace InPathNamespace, kind InPathKind, name InPathName, body PostInstanceCollectorActionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetInstanceConfigFile request
 	GetInstanceConfigFile(ctx context.Context, nodename InPathNodeName, namespace InPathNamespace, kind InPathKind, name InPathName, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -1512,8 +1520,8 @@ func (c *Client) PostDaemonHeartbeatStop(ctx context.Context, nodename InPathNod
 	return c.Client.Do(req)
 }
 
-func (c *Client) PostDaemonHeartbeatWipe(ctx context.Context, nodename InPathNodeName, name InPathHeartbeatName, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewPostDaemonHeartbeatWipeRequest(c.Server, nodename, name)
+func (c *Client) PostDaemonHeartbeatWipe(ctx context.Context, nodename InPathNodeName, name InPathHeartbeatName, params *PostDaemonHeartbeatWipeParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostDaemonHeartbeatWipeRequest(c.Server, nodename, name, params)
 	if err != nil {
 		return nil, err
 	}
@@ -1800,6 +1808,18 @@ func (c *Client) PostInstanceActionIngest(ctx context.Context, nodename InPathNo
 	return c.Client.Do(req)
 }
 
+func (c *Client) PostInstanceActionInstall(ctx context.Context, nodename InPathNodeName, namespace InPathNamespace, kind InPathKind, name InPathName, params *PostInstanceActionInstallParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostInstanceActionInstallRequest(c.Server, nodename, namespace, kind, name, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) PostInstanceActionPGReset(ctx context.Context, nodename InPathNodeName, namespace InPathNamespace, kind InPathKind, name InPathName, params *PostInstanceActionPGResetParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewPostInstanceActionPGResetRequest(c.Server, nodename, namespace, kind, name, params)
 	if err != nil {
@@ -2006,6 +2026,30 @@ func (c *Client) PostInstanceActionUpdate(ctx context.Context, nodename InPathNo
 
 func (c *Client) PostInstanceClear(ctx context.Context, nodename InPathNodeName, namespace InPathNamespace, kind InPathKind, name InPathName, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewPostInstanceClearRequest(c.Server, nodename, namespace, kind, name)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PostInstanceCollectorActionWithBody(ctx context.Context, nodename InPathNodeName, namespace InPathNamespace, kind InPathKind, name InPathName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostInstanceCollectorActionRequestWithBody(c.Server, nodename, namespace, kind, name, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PostInstanceCollectorAction(ctx context.Context, nodename InPathNodeName, namespace InPathNamespace, kind InPathKind, name InPathName, body PostInstanceCollectorActionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostInstanceCollectorActionRequest(c.Server, nodename, namespace, kind, name, body)
 	if err != nil {
 		return nil, err
 	}
@@ -6505,7 +6549,7 @@ func NewPostDaemonHeartbeatStopRequest(server string, nodename InPathNodeName, n
 }
 
 // NewPostDaemonHeartbeatWipeRequest generates requests for PostDaemonHeartbeatWipe
-func NewPostDaemonHeartbeatWipeRequest(server string, nodename InPathNodeName, name InPathHeartbeatName) (*http.Request, error) {
+func NewPostDaemonHeartbeatWipeRequest(server string, nodename InPathNodeName, name InPathHeartbeatName, params *PostDaemonHeartbeatWipeParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -6535,6 +6579,33 @@ func NewPostDaemonHeartbeatWipeRequest(server string, nodename InPathNodeName, n
 	queryURL, err := serverURL.Parse(operationPath)
 	if err != nil {
 		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Force != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "force", *params.Force, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
 	}
 
 	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
@@ -8023,6 +8094,136 @@ func NewPostInstanceActionIngestRequest(server string, nodename InPathNodeName, 
 	}
 
 	operationPath := fmt.Sprintf("/api/node/name/%s/instance/path/%s/%s/%s/action/ingest", pathParam0, pathParam1, pathParam2, pathParam3)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.SessionID != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "session_id", *params.SessionID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "uuid"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Rid != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "rid", *params.Rid, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Subset != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "subset", *params.Subset, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Tag != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "tag", *params.Tag, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.ConfigUpdatedAt != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "config_updated_at", *params.ConfigUpdatedAt, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "date-time"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewPostInstanceActionInstallRequest generates requests for PostInstanceActionInstall
+func NewPostInstanceActionInstallRequest(server string, nodename InPathNodeName, namespace InPathNamespace, kind InPathKind, name InPathName, params *PostInstanceActionInstallParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "nodename", nodename, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "namespace", namespace, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "kind", kind, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam3 string
+
+	pathParam3, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/node/name/%s/instance/path/%s/%s/%s/action/install", pathParam0, pathParam1, pathParam2, pathParam3)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -11244,6 +11445,74 @@ func NewPostInstanceClearRequest(server string, nodename InPathNodeName, namespa
 	return req, nil
 }
 
+// NewPostInstanceCollectorActionRequest calls the generic PostInstanceCollectorAction builder with application/json body
+func NewPostInstanceCollectorActionRequest(server string, nodename InPathNodeName, namespace InPathNamespace, kind InPathKind, name InPathName, body PostInstanceCollectorActionJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPostInstanceCollectorActionRequestWithBody(server, nodename, namespace, kind, name, "application/json", bodyReader)
+}
+
+// NewPostInstanceCollectorActionRequestWithBody generates requests for PostInstanceCollectorAction with any type of body
+func NewPostInstanceCollectorActionRequestWithBody(server string, nodename InPathNodeName, namespace InPathNamespace, kind InPathKind, name InPathName, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "nodename", nodename, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "namespace", namespace, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "kind", kind, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam3 string
+
+	pathParam3, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/node/name/%s/instance/path/%s/%s/%s/collector/action", pathParam0, pathParam1, pathParam2, pathParam3)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewGetInstanceConfigFileRequest generates requests for GetInstanceConfigFile
 func NewGetInstanceConfigFileRequest(server string, nodename InPathNodeName, namespace InPathNamespace, kind InPathKind, name InPathName) (*http.Request, error) {
 	var err error
@@ -11358,30 +11627,6 @@ func NewPostInstanceResourceConsoleRequest(server string, nodename InPathNodeNam
 		if params.Rid != nil {
 
 			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "rid", *params.Rid, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
-				return nil, err
-			} else {
-				for _, qp := range strings.Split(queryFrag, "&") {
-					rawQueryFragments = append(rawQueryFragments, qp)
-				}
-			}
-
-		}
-
-		if params.GreetTimeout != nil {
-
-			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "greet_timeout", *params.GreetTimeout, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
-				return nil, err
-			} else {
-				for _, qp := range strings.Split(queryFrag, "&") {
-					rawQueryFragments = append(rawQueryFragments, qp)
-				}
-			}
-
-		}
-
-		if params.Seats != nil {
-
-			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "seats", *params.Seats, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
 				return nil, err
 			} else {
 				for _, qp := range strings.Split(queryFrag, "&") {
@@ -14042,6 +14287,18 @@ func NewPostObjectConfigFileRequestWithBody(server string, namespace InPathNames
 
 		}
 
+		if params.WaitLocal != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "wait_local", *params.WaitLocal, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
 		if encoded := queryValues.Encode(); encoded != "" {
 			rawQueryFragments = append(rawQueryFragments, encoded)
 		}
@@ -15523,7 +15780,7 @@ type ClientWithResponsesInterface interface {
 	PostDaemonHeartbeatStopWithResponse(ctx context.Context, nodename InPathNodeName, name InPathHeartbeatName, reqEditors ...RequestEditorFn) (*PostDaemonHeartbeatStopResponse, error)
 
 	// PostDaemonHeartbeatWipeWithResponse request
-	PostDaemonHeartbeatWipeWithResponse(ctx context.Context, nodename InPathNodeName, name InPathHeartbeatName, reqEditors ...RequestEditorFn) (*PostDaemonHeartbeatWipeResponse, error)
+	PostDaemonHeartbeatWipeWithResponse(ctx context.Context, nodename InPathNodeName, name InPathHeartbeatName, params *PostDaemonHeartbeatWipeParams, reqEditors ...RequestEditorFn) (*PostDaemonHeartbeatWipeResponse, error)
 
 	// PostDaemonListenerRestartWithResponse request
 	PostDaemonListenerRestartWithResponse(ctx context.Context, nodename InPathNodeName, name InPathListenerName, reqEditors ...RequestEditorFn) (*PostDaemonListenerRestartResponse, error)
@@ -15592,6 +15849,9 @@ type ClientWithResponsesInterface interface {
 	// PostInstanceActionIngestWithResponse request
 	PostInstanceActionIngestWithResponse(ctx context.Context, nodename InPathNodeName, namespace InPathNamespace, kind InPathKind, name InPathName, params *PostInstanceActionIngestParams, reqEditors ...RequestEditorFn) (*PostInstanceActionIngestResponse, error)
 
+	// PostInstanceActionInstallWithResponse request
+	PostInstanceActionInstallWithResponse(ctx context.Context, nodename InPathNodeName, namespace InPathNamespace, kind InPathKind, name InPathName, params *PostInstanceActionInstallParams, reqEditors ...RequestEditorFn) (*PostInstanceActionInstallResponse, error)
+
 	// PostInstanceActionPGResetWithResponse request
 	PostInstanceActionPGResetWithResponse(ctx context.Context, nodename InPathNodeName, namespace InPathNamespace, kind InPathKind, name InPathName, params *PostInstanceActionPGResetParams, reqEditors ...RequestEditorFn) (*PostInstanceActionPGResetResponse, error)
 
@@ -15645,6 +15905,11 @@ type ClientWithResponsesInterface interface {
 
 	// PostInstanceClearWithResponse request
 	PostInstanceClearWithResponse(ctx context.Context, nodename InPathNodeName, namespace InPathNamespace, kind InPathKind, name InPathName, reqEditors ...RequestEditorFn) (*PostInstanceClearResponse, error)
+
+	// PostInstanceCollectorActionWithBodyWithResponse request with any body
+	PostInstanceCollectorActionWithBodyWithResponse(ctx context.Context, nodename InPathNodeName, namespace InPathNamespace, kind InPathKind, name InPathName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostInstanceCollectorActionResponse, error)
+
+	PostInstanceCollectorActionWithResponse(ctx context.Context, nodename InPathNodeName, namespace InPathNamespace, kind InPathKind, name InPathName, body PostInstanceCollectorActionJSONRequestBody, reqEditors ...RequestEditorFn) (*PostInstanceCollectorActionResponse, error)
 
 	// GetInstanceConfigFileWithResponse request
 	GetInstanceConfigFileWithResponse(ctx context.Context, nodename InPathNodeName, namespace InPathNamespace, kind InPathKind, name InPathName, reqEditors ...RequestEditorFn) (*GetInstanceConfigFileResponse, error)
@@ -18005,6 +18270,7 @@ type PostDaemonHeartbeatWipeResponse struct {
 	JSON400      *N400
 	JSON401      *N401
 	JSON403      *N403
+	JSON409      *N409
 	JSON500      *N500
 }
 
@@ -18747,6 +19013,41 @@ func (r PostInstanceActionIngestResponse) ContentType() string {
 	return ""
 }
 
+type PostInstanceActionInstallResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *InstanceActionAccepted
+	JSON400      *N400
+	JSON401      *N401
+	JSON403      *N403
+	JSON409      *N409
+	JSON500      *N500
+}
+
+// Status returns HTTPResponse.Status
+func (r PostInstanceActionInstallResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PostInstanceActionInstallResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r PostInstanceActionInstallResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type PostInstanceActionPGResetResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -19375,6 +19676,40 @@ func (r PostInstanceClearResponse) ContentType() string {
 	return ""
 }
 
+type PostInstanceCollectorActionResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON400      *N400
+	JSON401      *N401
+	JSON403      *N403
+	JSON404      *N404
+	JSON500      *N500
+}
+
+// Status returns HTTPResponse.Status
+func (r PostInstanceCollectorActionResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PostInstanceCollectorActionResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r PostInstanceCollectorActionResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type GetInstanceConfigFileResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -19411,6 +19746,7 @@ func (r GetInstanceConfigFileResponse) ContentType() string {
 type PostInstanceResourceConsoleResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
+	JSON201      *ConsoleTicket
 	JSON400      *N400
 	JSON401      *N401
 	JSON403      *N403
@@ -22334,8 +22670,8 @@ func (c *ClientWithResponses) PostDaemonHeartbeatStopWithResponse(ctx context.Co
 }
 
 // PostDaemonHeartbeatWipeWithResponse request returning *PostDaemonHeartbeatWipeResponse
-func (c *ClientWithResponses) PostDaemonHeartbeatWipeWithResponse(ctx context.Context, nodename InPathNodeName, name InPathHeartbeatName, reqEditors ...RequestEditorFn) (*PostDaemonHeartbeatWipeResponse, error) {
-	rsp, err := c.PostDaemonHeartbeatWipe(ctx, nodename, name, reqEditors...)
+func (c *ClientWithResponses) PostDaemonHeartbeatWipeWithResponse(ctx context.Context, nodename InPathNodeName, name InPathHeartbeatName, params *PostDaemonHeartbeatWipeParams, reqEditors ...RequestEditorFn) (*PostDaemonHeartbeatWipeResponse, error) {
+	rsp, err := c.PostDaemonHeartbeatWipe(ctx, nodename, name, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -22547,6 +22883,15 @@ func (c *ClientWithResponses) PostInstanceActionIngestWithResponse(ctx context.C
 	return ParsePostInstanceActionIngestResponse(rsp)
 }
 
+// PostInstanceActionInstallWithResponse request returning *PostInstanceActionInstallResponse
+func (c *ClientWithResponses) PostInstanceActionInstallWithResponse(ctx context.Context, nodename InPathNodeName, namespace InPathNamespace, kind InPathKind, name InPathName, params *PostInstanceActionInstallParams, reqEditors ...RequestEditorFn) (*PostInstanceActionInstallResponse, error) {
+	rsp, err := c.PostInstanceActionInstall(ctx, nodename, namespace, kind, name, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostInstanceActionInstallResponse(rsp)
+}
+
 // PostInstanceActionPGResetWithResponse request returning *PostInstanceActionPGResetResponse
 func (c *ClientWithResponses) PostInstanceActionPGResetWithResponse(ctx context.Context, nodename InPathNodeName, namespace InPathNamespace, kind InPathKind, name InPathName, params *PostInstanceActionPGResetParams, reqEditors ...RequestEditorFn) (*PostInstanceActionPGResetResponse, error) {
 	rsp, err := c.PostInstanceActionPGReset(ctx, nodename, namespace, kind, name, params, reqEditors...)
@@ -22707,6 +23052,23 @@ func (c *ClientWithResponses) PostInstanceClearWithResponse(ctx context.Context,
 		return nil, err
 	}
 	return ParsePostInstanceClearResponse(rsp)
+}
+
+// PostInstanceCollectorActionWithBodyWithResponse request with arbitrary body returning *PostInstanceCollectorActionResponse
+func (c *ClientWithResponses) PostInstanceCollectorActionWithBodyWithResponse(ctx context.Context, nodename InPathNodeName, namespace InPathNamespace, kind InPathKind, name InPathName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostInstanceCollectorActionResponse, error) {
+	rsp, err := c.PostInstanceCollectorActionWithBody(ctx, nodename, namespace, kind, name, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostInstanceCollectorActionResponse(rsp)
+}
+
+func (c *ClientWithResponses) PostInstanceCollectorActionWithResponse(ctx context.Context, nodename InPathNodeName, namespace InPathNamespace, kind InPathKind, name InPathName, body PostInstanceCollectorActionJSONRequestBody, reqEditors ...RequestEditorFn) (*PostInstanceCollectorActionResponse, error) {
+	rsp, err := c.PostInstanceCollectorAction(ctx, nodename, namespace, kind, name, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostInstanceCollectorActionResponse(rsp)
 }
 
 // GetInstanceConfigFileWithResponse request returning *GetInstanceConfigFileResponse
@@ -26776,6 +27138,13 @@ func ParsePostDaemonHeartbeatWipeResponse(rsp *http.Response) (*PostDaemonHeartb
 		}
 		response.JSON403 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest N409
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
 		var dest N500
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -27929,6 +28298,67 @@ func ParsePostInstanceActionIngestResponse(rsp *http.Response) (*PostInstanceAct
 	return response, nil
 }
 
+// ParsePostInstanceActionInstallResponse parses an HTTP response from a PostInstanceActionInstallWithResponse call
+func ParsePostInstanceActionInstallResponse(rsp *http.Response) (*PostInstanceActionInstallResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PostInstanceActionInstallResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest InstanceActionAccepted
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest N400
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest N401
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest N403
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest N409
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest N500
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParsePostInstanceActionPGResetResponse parses an HTTP response from a PostInstanceActionPGResetWithResponse call
 func ParsePostInstanceActionPGResetResponse(rsp *http.Response) (*PostInstanceActionPGResetResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -29013,6 +29443,60 @@ func ParsePostInstanceClearResponse(rsp *http.Response) (*PostInstanceClearRespo
 	return response, nil
 }
 
+// ParsePostInstanceCollectorActionResponse parses an HTTP response from a PostInstanceCollectorActionWithResponse call
+func ParsePostInstanceCollectorActionResponse(rsp *http.Response) (*PostInstanceCollectorActionResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PostInstanceCollectorActionResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest N400
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest N401
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest N403
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest N404
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest N500
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseGetInstanceConfigFileResponse parses an HTTP response from a GetInstanceConfigFileWithResponse call
 func ParseGetInstanceConfigFileResponse(rsp *http.Response) (*GetInstanceConfigFileResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -29074,6 +29558,13 @@ func ParsePostInstanceResourceConsoleResponse(rsp *http.Response) (*PostInstance
 	}
 
 	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest ConsoleTicket
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
 		var dest N400
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {

@@ -120,6 +120,36 @@ OpenSVC v3 is a major evolution, rebuilt in Go for performance, reliability, and
 * **Time format change:**
     OpenSVC now uses RFC3339 time format for all internal and exposed data, replacing the Unix timestamps.
 
+* **Sysreport:**
+    `om node sysreport` reports to the oc3 feeder, `POST /api/node/sysreport`, and no longer to the jsonrpc `send_sysreport` method of the old collector: an om3 node is fed to oc3.
+    `om node sysreport --force` sends a full report, which the collector replaces what it holds of the node with, rather than a list of deletions computed from the jsonrpc `sysreport_lstree` of the old collector.
+    A report is a full one until the collector accepts one: the first report of a node after the upgrade sends every tracked file once, and a report the collector refused has the next one full, since the local cache records the files as reported when it collects them.
+
+* **Collector keywords:**
+    The oc3 collector settings move to a `[collector]` section, usually set in `cluster.conf`, and lose their `collector_` prefix:
+
+    | Deprecated               | Replaced by               |
+    |--------------------------|---------------------------|
+    | `node.collector`         | `collector.url`           |
+    | `node.collector_feeder`  | `collector.feeder`        |
+    | `node.collector_server`  | `collector.server`        |
+    | `node.collector_ping_interval`, `node.db_min_ping_interval`   | `collector.ping_interval` |
+    | `node.collector_status_delay`, `node.db_min_update_interval`  | `collector.status_delay`  |
+    | `node.collector_timeout` | `collector.timeout`       |
+
+    A `[node]` keyword is still read where the `[collector]` section does not set its replacement, and the configuration validation warns about it.
+
+    ```
+    [collector]
+    url = https://collector.opensvc.com
+    ```
+
+* **SAN switches:**
+    A switch is inventoried by `om node push switch [<name>]`, and on the `schedule` of its `switch#<name>` section, with the `pushswitch` scheduler action: the v2 `om node pushbrocade` command and the `[brocade] schedule` keyword are gone.
+    The `telnet` method of a brocade switch is refused, as telnet sends the password in clear: set `method = ssh`, with a `key` or a `password` secret.
+    The switch key is trusted on the first connection and recorded in the root known hosts, where v2 connected with `StrictHostKeyChecking=no`: a switch presenting another key later is refused.
+    The report goes to the oc3 switch feed, and to the old collector `update_brocade` rpc where oc3 does not serve it.
+
 * **`cluster.name` default value:**
     In v2.1, the default cluster name was `default`.
     In v3, if `cluster.name` is undefined at startup, it will be automatically replaced with a randomly generated human-readable value.
@@ -141,6 +171,10 @@ OpenSVC v3 is a major evolution, rebuilt in Go for performance, reliability, and
         | `alt_secret`  | Alternate secret to decrypt heartbeat msg |
         | `alt_version` | Version of the alternate secreat          |
         |---------------|-------------------------------------------|
+
+* **`node.min_avail_mem` and `node.min_avail_swap` read as in v2:**
+    They take a percentage, `10` or `10%`, or a size, `512m` or `2Gi`, which is read as the whole percentage of the memory or swap of the node it amounts to, and as 50% of the memory at most, as v2 did. A number with no unit is a percentage, where v2 read it as a count of bytes. `min_avail_mem_pct` and `min_avail_swap_pct` are read as them.
+    A node without swap, or whose memory om can not read, is no longer held overloaded by them.
 
 * **`node.default_mon_format` removed:**
     It should be a user-level setting, not a node-level config.
@@ -861,6 +895,9 @@ which share the same executor.
 
     * The `origin=daemon` log entries attribute is replaced with `origin=daemon/monitor`.
 
+* **Action logs reported to the collector:**
+    The actions started by the daemon scheduler, as the scheduled task runs and sync updates, are no longer reported to the collector, and the `node.dblogcron` keyword is not supported.
+
 ### Heartbeat: relay
 
 The v3 agent needs to address a v3 relay.
@@ -1037,6 +1074,10 @@ Where the password is the value of the `þassword` key in `system/sec/relay-v3`.
     Use `--wait` to block until the cluster nodes are updated. Beware, that only says the cluster dropped the node:
     the daemon restart and the user creation happen afterwards, on a node this cluster no longer observes.
 
+* `ox context login` logs in at the openid issuer the cluster trusts, when it trusts one: in the browser of the machine, the issuer redirecting to `http://127.0.0.1:<port>/callback`, which the issuer must allow for the client the cluster names, or with a device code from a browser anywhere, when the machine has no browser or with `--device`. `--auth password` logs in with the password of the context user, as before. A context logging in at the openid issuer needs no user: `ox context add` takes no `--user` then, and the connection selector of the terminal ui offers it.
+
+    The openid tokens are shared by the contexts whose clusters trust the same issuer and client: a context logging in, or used before any login, where a valid refresh token is cached needs no challenge. They are kept in the keyring of the session, else in a file encrypted with a key derived from a signature of an ed25519 or rsa key of the ssh-agent, else in a file only the user reads. `--cache keyring|agent|file` chooses, and `ox context list` shows the store and the issuer of each context.
+
 * The `om cluster leave` command accepts `--credential <path>`, naming a file holding the `<username>:<password>` of a
    user to create once the daemon has restarted alone, for the reason `o[mx] cluster evict` does. The
    `OSVC_CREDENTIAL` environment variable is read when the option is not set. Without either, no user is created and
@@ -1110,6 +1151,34 @@ Where the password is the value of the `þassword` key in `system/sec/relay-v3`.
 
     Every node used to post the resource info of its own instances straight to the collector. The refreshing node now only signals its peers, and the speaker fetches the key-values and reports them on its own throttled schedule, so a cluster talks to the collector through a single node and coalesces what it sends.
 
+* The instance actions are reported to the oc3 collector, with their log lines.
+
+    The begin and the end of an instance action are sent to the oc3 feeder `/api/instance/action`, the end with the log lines of the action, info level and above, read from the journal of the node it ran on by `EXEC_ID` and `OBJ_PATH`. As the resource info, they go through the collector speaker: the node running the action keeps the begin and the end in `<var>/node/collector/action_pending/`, and announces them to the speaker until it acknowledges them, so no report is lost to a daemon down during the action, to a speaker change, or to a collector down. A report not acknowledged within 24 hours is dropped.
+
+    A restart, or a provision and the stop ending it, report once. The actions started by the daemon scheduler, and the actions of volatile or disabled objects, are not reported. `node.dblog = false` disables the reports.
+
+    The speaker names the node an action ran on, and the node of an instance resource info, as `nodename`: an oc3 feeder api 3.0.5 or later is required to file them under that node rather than under the speaker.
+
+    The new `collector.action_batch` (default `100`) and `collector.action_log_timeout` (default `10s`) keywords tune the sends, and `collector.timeout` bounds each of them.
+
+* A collector down no longer floods the daemon log.
+
+    Each feed of the collector speaker, the daemon status, the resource info, the instance config and the action logs, logs its failing sends at debug level, and warns once, then at an interval doubling from 10s up to 1 hour, with the count of items pending. A feed sending again tells the collector accepts it again.
+
+    The resource info, instance config and action log sends stop at the first failure, keeping their queue for the next tick, so a collector down costs one send per feed and tick instead of one per queued item. A 4xx response refuses an item for good: it is dropped with a warning instead of being sent again.
+
+* New prometheus metrics of the collector speaker, on `/metrics`:
+
+    * `opensvc_collector_requests_total{feed,code}`: the collector calls, by feed (`daemon_ping`, `daemon_status`, `daemon_change`, `resource_info`, `object_config`, `instance_action`) and status code, `error` for a call without response. Each call carries one item, so its rate is the push rate.
+    * `opensvc_collector_pending{feed}`: the items the speaker holds for the collector, what piles up while it is down or not configured yet. Zero on the other nodes.
+    * `opensvc_collector_action_pending_files`: on every node, the local instance actions whose begin or end the collector did not acknowledge yet. Summed over the cluster, the action backlog, speaker or not.
+
+    ```
+    # push rate accepted by the collector, and backlog
+    sum by (feed) (rate(opensvc_collector_requests_total{code="202"}[5m]))
+    sum by (feed) (opensvc_collector_pending)
+    ```
+
 ### sec
 
 * Add "o[mx] key rename --name old --to new" commands
@@ -1165,6 +1234,8 @@ Where the password is the value of the `þassword` key in `system/sec/relay-v3`.
     ```
 
 * Rename the stonith sections `cmd` option to `command`. Backward compatibility is implemented.
+
+* `om cluster config migrate` and `om node config migrate` write the cluster and node configurations in the shape om3 reads them in: the keywords under a former name, `ips_per_node`, `listener.openid_well_known`, the `brocade` schedule, and the removal of what om3 no longer reads. `--dry-run` prints the changes first, and the help lists the rules.
 
 ### DNS
 

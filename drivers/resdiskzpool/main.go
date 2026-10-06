@@ -245,7 +245,7 @@ func (t *T) isUp(ctx context.Context) (bool, error) {
 	case "ONLINE":
 		return true, nil
 	case "SUSPENDED", "DEGRADED":
-		t.StatusLog().Warn(strings.ToLower(data.State))
+		t.StatusLog().Warn("%s", strings.ToLower(data.State))
 		return false, nil
 	default:
 		return false, nil
@@ -495,4 +495,10 @@ func (t *T) toDevices(l []string) device.L {
 		devs = append(devs, dev)
 	}
 	return devs
+}
+
+// PoolName is the name of the pool, by which a check of its health is
+// attributed to the object.
+func (t *T) PoolName() string {
+	return t.Name
 }

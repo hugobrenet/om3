@@ -3,11 +3,13 @@ package ox
 import (
 	// Necessary to use go:embed
 	_ "embed"
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
 
 	"github.com/opensvc/om3/v3/core/commoncmd"
+	"github.com/opensvc/om3/v3/core/console"
 	commands "github.com/opensvc/om3/v3/core/oxcmd"
 	"github.com/opensvc/om3/v3/core/tui"
 	"github.com/opensvc/om3/v3/util/duration"
@@ -339,6 +341,7 @@ installed software to be discovered without restarting the daemon.`,
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
 	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
+	commoncmd.FlagFollow(flags, &options.Follow)
 	return cmd
 }
 
@@ -357,6 +360,7 @@ This command scans SCSI hosts for new block devices. You can specify specific HB
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
 	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
+	commoncmd.FlagFollow(flags, &options.Follow)
 	commoncmd.FlagSCSIHBA(flags, &options.HBA)
 	commoncmd.FlagSCSITarget(flags, &options.Target)
 	commoncmd.FlagSCSILUN(flags, &options.LUN)
@@ -812,7 +816,7 @@ connection, or that asks late, still be told how it went.`,
 	commoncmd.CmdWithArg(cmd, `ORCHESTRATION_ID  The orchestration id the submitter of the action was handed.`)
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
-	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
+	commoncmd.FlagNodeSelectorOrAll(flags, &options.NodeSelector)
 	flags.DurationVar(&options.Wait, "duration", 0, "give up waiting after this duration")
 	return cmd
 }
@@ -841,7 +845,7 @@ follow one.`,
 	commoncmd.CmdWithArg(cmd, `ORCHESTRATION_ID  The orchestration id the submitter of the action was handed.`)
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
-	commoncmd.FlagNodeSelectorOrLocalnode(flags, &options.NodeSelector)
+	commoncmd.FlagNodeSelectorOrAll(flags, &options.NodeSelector)
 	flags.StringSliceVar(&options.States, "state", nil, "list the orchestrations in these states, every state when not set")
 	return cmd
 }
@@ -1056,7 +1060,7 @@ func newCmdNodeConfigEval() *cobra.Command {
 	addFlagsGlobal(flags, &options.OptsGlobal)
 	commoncmd.FlagsLock(flags, &options.OptsLock)
 	commoncmd.FlagImpersonate(flags, &options.Impersonate)
-	commoncmd.FlagKeywords(flags, &options.Keywords)
+	commoncmd.FlagKeywordSelection(flags, &options.Keywords)
 	commoncmd.FlagNodeSelectorOrAll(flags, &options.NodeSelector)
 	return cmd
 }
@@ -1077,8 +1081,24 @@ func newCmdNodeConfigGet() *cobra.Command {
 	commoncmd.FlagsLock(flags, &options.OptsLock)
 	commoncmd.FlagEval(flags, &options.Eval)
 	commoncmd.FlagImpersonate(flags, &options.Impersonate)
-	commoncmd.FlagKeywords(flags, &options.Keywords)
+	commoncmd.FlagKeywordSelection(flags, &options.Keywords)
 	commoncmd.FlagNodeSelectorOrAll(flags, &options.NodeSelector)
+	return cmd
+}
+
+func newCmdNodeConfigMigrate() *cobra.Command {
+	var options commoncmd.CmdNodeConfigMigrate
+	cmd := &cobra.Command{
+		Use:   "migrate",
+		Short: "write the configuration in the shape om reads it in",
+		Long:  commoncmd.NodeConfigMigrateLong(),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return options.Run()
+		},
+	}
+	flags := cmd.Flags()
+	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
+	commoncmd.FlagDryRun(flags, &options.DryRun)
 	return cmd
 }
 
@@ -1256,6 +1276,7 @@ func newCmdNodePushAsset() *cobra.Command {
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
 	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
+	commoncmd.FlagFollow(flags, &options.Follow)
 	commoncmd.FlagDryRun(flags, &options.DryRun)
 	commoncmd.FlagIgnoreNoCollectorConfigured(flags, &options.IgnoreNoCollectorConfigured)
 	return cmd
@@ -1274,6 +1295,7 @@ func newCmdNodePushDisk() *cobra.Command {
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
 	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
+	commoncmd.FlagFollow(flags, &options.Follow)
 	commoncmd.FlagDryRun(flags, &options.DryRun)
 	commoncmd.FlagIgnoreNoCollectorConfigured(flags, &options.IgnoreNoCollectorConfigured)
 	return cmd
@@ -1291,6 +1313,7 @@ func newCmdNodePushPkg() *cobra.Command {
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
 	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
+	commoncmd.FlagFollow(flags, &options.Follow)
 	commoncmd.FlagDryRun(flags, &options.DryRun)
 	commoncmd.FlagIgnoreNoCollectorConfigured(flags, &options.IgnoreNoCollectorConfigured)
 	return cmd
@@ -1314,6 +1337,7 @@ func newCmdNodeRegister() *cobra.Command {
 	commoncmd.FlagCollectorPassword(flags, &options.Password)
 	commoncmd.FlagCollectorApp(flags, &options.App)
 	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
+	commoncmd.FlagFollow(flags, &options.Follow)
 
 	return cmd
 }
@@ -1359,6 +1383,7 @@ func newCmdNodeSysreport() *cobra.Command {
 	addFlagsGlobal(flags, &options.OptsGlobal)
 	commoncmd.FlagForce(flags, &options.Force)
 	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
+	commoncmd.FlagFollow(flags, &options.Follow)
 	commoncmd.FlagIgnoreNoCollectorConfigured(flags, &options.IgnoreNoCollectorConfigured)
 	return cmd
 }
@@ -1574,7 +1599,7 @@ func newCmdObjectConfigEval(kind string) *cobra.Command {
 	commoncmd.CmdWithArg(cmd, "KEYWORD  A configuration keyword, as [<section>.]<option>. Every keyword when none is named.")
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
-	commoncmd.FlagKeywords(flags, &options.Keywords)
+	commoncmd.FlagKeywordSelection(flags, &options.Keywords)
 	commoncmd.FlagImpersonate(flags, &options.Impersonate)
 	return cmd
 }
@@ -1594,7 +1619,7 @@ func newCmdObjectConfigGet(kind string) *cobra.Command {
 	addFlagsGlobal(flags, &options.OptsGlobal)
 	commoncmd.FlagEval(flags, &options.Eval)
 	commoncmd.FlagImpersonate(flags, &options.Impersonate)
-	commoncmd.FlagKeywords(flags, &options.Keywords)
+	commoncmd.FlagKeywordSelection(flags, &options.Keywords)
 	return cmd
 }
 
@@ -1638,22 +1663,7 @@ func newCmdObjectConfigMigrate(kind string) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "migrate",
 		Short: "write the configuration in the shape om reads it in",
-		Long: `Write the configuration in the shape om reads it in.
-
-A configuration written for an older agent describes things this one no longer
-reads that way. What it asked for is still possible, in another shape, and
-this writes that shape: the configuration says the same thing afterwards, in
-words om reads. What changes is printed, and what no rule can write is printed
-with the reason.
-
-A filesystem that made the volume it mounts becomes a disk.lv resource and a
-filesystem resting on it. A size written as a share of a volume group becomes
-arithmetic on what om reports of that group, where the group is a resource of
-the object, and is kept as it is where it is not.
-
-The changes land as a configuration update, so they are weighed like any other
-write. The configuration as it was is kept under the backup directory of the
-node this runs on, and where it was kept is printed.`,
+		Long:  commoncmd.ObjectConfigMigrateLong(kind),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return options.Run(kind)
 		},
@@ -1969,6 +1979,7 @@ func newCmdObjectFS(kind string) *cobra.Command {
 		newCmdObjectGroupList(kind, "fs"),
 		newCmdObjectGroupInfo(kind, "fs"),
 		newCmdObjectGroupProvision(kind, "fs"),
+		newCmdObjectGroupInstall(kind, "fs"),
 		newCmdObjectGroupPRStart(kind, "fs"),
 		newCmdObjectGroupPRStop(kind, "fs"),
 		newCmdObjectGroupRestart(kind, "fs"),
@@ -1987,6 +1998,7 @@ func newCmdObjectVolume(kind string) *cobra.Command {
 		newCmdObjectGroupList(kind, "volume"),
 		newCmdObjectGroupInfo(kind, "volume"),
 		newCmdObjectGroupProvision(kind, "volume"),
+		newCmdObjectGroupInstall(kind, "volume"),
 		newCmdObjectGroupPRStart(kind, "volume"),
 		newCmdObjectGroupPRStop(kind, "volume"),
 		newCmdObjectGroupRestart(kind, "volume"),
@@ -2029,6 +2041,7 @@ func newCmdObjectResource(kind string) *cobra.Command {
 		newCmdObjectGroupInfo(kind, ""),
 		newCmdObjectGroupProvision(kind, ""),
 		newCmdObjectGroupUnprovision(kind, ""),
+		newCmdObjectGroupInstall(kind, ""),
 		newCmdObjectGroupPRStart(kind, ""),
 		newCmdObjectGroupPRStop(kind, ""),
 		newCmdObjectGroupRestart(kind, ""),
@@ -2801,6 +2814,7 @@ func newCmdObjectGroupRun(kind, group string) *cobra.Command {
 	commoncmd.FlagsTo(flags, &options.OptTo)
 	commoncmd.FlagConfirm(flags, &options.Confirm)
 	commoncmd.FlagCron(flags, &options.Cron)
+	commoncmd.FlagForce(flags, &options.Force)
 	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
 	commoncmd.FlagEnv(flags, &options.Env)
 	return cmd
@@ -3064,15 +3078,30 @@ func newCmdObjectContainer(kind string) *cobra.Command {
 	return cmd
 }
 
+// quietExitStatus keeps the exit status of the shell of a console session
+// from being reported as an error of the command: it is the exit status of
+// the command, as it is of ssh, and nothing is printed about it.
+func quietExitStatus(cmd *cobra.Command, err error) error {
+	var exitStatus console.ExitStatus
+	if errors.As(err, &exitStatus) {
+		cmd.SilenceErrors = true
+	}
+	return err
+}
+
 func newCmdObjectContainerEnter(kind string) *cobra.Command {
 	var options commands.CmdObjectContainerEnter
 	cmd := &cobra.Command{
 		Use:   "enter [PATTERN]...",
 		Short: "open a shell in a container resource",
-		Long:  "Enter any container resource.",
+		Long: `Enter any container resource.
+
+Without --node, the container is entered on the node it runs on, when it runs
+on one node only. A container running on several nodes is entered on the node
+--node names.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			commoncmd.SetRIDFromArgs(&options.RID, args, "container", "container")
-			return options.Run(kind)
+			return quietExitStatus(cmd, options.Run(kind))
 		},
 	}
 	commoncmd.CmdWithArg(cmd, "PATTERN  A fnmatch resource index filter.")
@@ -3277,6 +3306,63 @@ func newCmdObjectInstanceProvision(kind string) *cobra.Command {
 	commoncmd.FlagLeader(flags, &options.Leader)
 	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
 	commoncmd.FlagStateOnly(flags, &options.StateOnly)
+	return cmd
+}
+
+func newCmdObjectInstanceInstall(kind string) *cobra.Command {
+	var options commands.CmdObjectInstanceInstall
+	cmd := &cobra.Command{
+		Use:   "install",
+		Short: "install again the data of the volumes and filesystems",
+		Long: `Install again what the volumes and the filesystems of the instance declare
+(the install, configs, secrets and directories keywords), as their start does,
+without starting anything, and send the signals of their install lines for the
+files whose content changed.
+
+As opposed to a start, it says what it leaves as it is too, and why: a
+directory in place, a file up to date, a key the store does not hold, a
+store that does not exist, a resource not up here, a resource installing
+nothing.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return options.Run(kind)
+		},
+	}
+	flags := cmd.Flags()
+	addFlagsGlobal(flags, &options.OptsGlobal)
+	commoncmd.FlagsAsync(flags, &options.OptsAsync)
+	commoncmd.FlagsLock(flags, &options.OptsLock)
+	commoncmd.FlagsResourceSelector(cmd, &options.OptsResourceSelector)
+	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
+	cmd.MarkFlagsMutuallyExclusive("no-lock", "node")
+	cmd.MarkFlagsMutuallyExclusive("waitlock", "node")
+	return cmd
+}
+
+func newCmdObjectGroupInstall(kind, group string) *cobra.Command {
+	var options commands.CmdObjectInstanceInstall
+	use, arg, long := "install [PATTERN]...", "PATTERN  A fnmatch resource index filter.", fmt.Sprintf("Install again the data of the %s resources, as their start does, without starting anything. Equivalent to 'instance install --rid %s#<ID>'.", group, group)
+	if group == "" {
+		use, arg, long = "install [RID]...", "RID  A resource id, or a resource selector expression.", "Install again the data of the resources, as their start does, without starting anything. Equivalent to 'instance install --rid <RID>'."
+	}
+	cmd := &cobra.Command{
+		Use:   use,
+		Short: "install again the data of the resources",
+		Long: long + `
+
+It says what it leaves as it is too, and why: a directory in place, a file up
+to date, a key the store does not hold, a store that does not exist, a
+resource not up here, a resource installing nothing.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			commoncmd.SetRIDFromArgs(&options.RID, args, group, group)
+			return options.Run(kind)
+		},
+	}
+	commoncmd.CmdWithArg(cmd, arg)
+	flags := cmd.Flags()
+	addFlagsGlobal(flags, &options.OptsGlobal)
+	commoncmd.FlagsAsync(flags, &options.OptsAsync)
+	commoncmd.FlagsLock(flags, &options.OptsLock)
+	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
 	return cmd
 }
 
@@ -3640,8 +3726,8 @@ A resize only grows.`,
 func newCmdObjectRestart(kind string) *cobra.Command {
 	var options commands.CmdObjectRestart
 	cmd := &cobra.Command{
-		Use:   "orchestrate restart",
-		Short: "restart the selected objects, instances or resources",
+		Use:   "restart",
+		Short: "orchestrate restart",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return options.Run(kind)
 		},
@@ -3650,6 +3736,7 @@ func newCmdObjectRestart(kind string) *cobra.Command {
 	flags := cmd.Flags()
 	addFlagsGlobal(flags, &options.OptsGlobal)
 	commoncmd.FlagsAsync(flags, &options.OptsAsync)
+	commoncmd.FlagForce(flags, &options.Force)
 	return cmd
 }
 
@@ -3811,6 +3898,7 @@ func newCmdObjectInstanceRun(kind string) *cobra.Command {
 	commoncmd.FlagsResourceSelector(cmd, &options.OptsResourceSelector)
 	commoncmd.FlagConfirm(flags, &options.Confirm)
 	commoncmd.FlagCron(flags, &options.Cron)
+	commoncmd.FlagForce(flags, &options.Force)
 	commoncmd.FlagNodeSelector(flags, &options.NodeSelector)
 	commoncmd.FlagEnv(flags, &options.Env)
 	return cmd
@@ -3997,6 +4085,7 @@ func newCmdObjectTakeover(kind string) *cobra.Command {
 	addFlagsGlobal(flags, &options.OptsGlobal)
 	commoncmd.FlagsAsync(flags, &options.OptsAsync)
 	commoncmd.FlagLive(flags, &options.Live)
+	commoncmd.FlagInterruptSyncs(flags, &options.InterruptSyncs)
 	return cmd
 }
 
@@ -4508,14 +4597,13 @@ func NewCmdContextAdd() *cobra.Command {
 
 	flags := cmd.Flags()
 	flags.StringVar(&options.Name, "name", "", "Context name")
-	flags.StringVar(&options.User, "user", "", "User name")
+	flags.StringVar(&options.User, "user", "", "User name, needed by a password login; a context without a user logs in at the openid issuer of its cluster")
 	flags.StringVar(&options.Cluster, "cluster", "", "Cluster name")
 	flags.StringVar(&options.Namespace, "namespace", "", "Namespace")
 	flags.Var(duration.NewFlag(&options.AccessTokenDuration), "access-token-duration", "Access token duration, for example 1h or 1d")
 	flags.Var(duration.NewFlag(&options.RefreshTokenDuration), "refresh-token-duration", "Refresh token duration, for example 1h or 1d")
 
 	_ = cmd.MarkFlagRequired("name")
-	_ = cmd.MarkFlagRequired("user")
 	_ = cmd.MarkFlagRequired("cluster")
 
 	return cmd
@@ -4527,22 +4615,23 @@ func NewCmdContextChange() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "change",
 		Short: "change a context",
+		Long:  "Change the context named by --name: only the flags given are changed. --user \"\" removes the user, for a context logging in at the openid issuer of its cluster.",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			options.UserChanged = cmd.Flags().Changed("user")
+			options.ClusterChanged = cmd.Flags().Changed("cluster")
 			return options.Run()
 		},
 	}
 
 	flags := cmd.Flags()
 	flags.StringVar(&options.Name, "name", "", "Context name")
-	flags.StringVar(&options.User, "user", "", "User name")
+	flags.StringVar(&options.User, "user", "", "User name, empty for a context logging in at the openid issuer of its cluster")
 	flags.StringVar(&options.Cluster, "cluster", "", "Cluster name")
 	flags.StringVar(&options.Namespace, "namespace", "", "Namespace")
 	flags.Var(duration.NewFlag(&options.AccessTokenDuration), "access-token-duration", "Access token duration, for example 1h or 1d")
 	flags.Var(duration.NewFlag(&options.RefreshTokenDuration), "refresh-token-duration", "Refresh token duration, for example 1h or 1d")
 
 	_ = cmd.MarkFlagRequired("name")
-	_ = cmd.MarkFlagRequired("user")
-	_ = cmd.MarkFlagRequired("cluster")
 
 	return cmd
 }
@@ -4740,14 +4829,33 @@ func NewCmdContextLogin() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "request and cache authentication tokens",
+		Long: `Request and cache the authentication tokens of a context.
+
+When the cluster of the context trusts an openid issuer, the login is made
+there: in the browser of this machine, the issuer redirecting to a listener of
+127.0.0.1, or with a device code from a browser anywhere when this machine has
+no browser, or with --device. The issuer must allow the redirect uri
+http://127.0.0.1:<any port>/callback for the client the cluster names.
+
+The openid tokens are shared by the contexts whose clusters trust the same
+issuer and client: logging in one of them logs the others in, and a context
+logging in where a valid refresh token is cached needs no challenge. They are
+kept in the keyring of the session, else in a file encrypted with a key of
+the ssh-agent, else in a file only the user reads; --cache chooses.
+
+--auth password logs in with the password of the context user, as when the
+cluster trusts no openid issuer.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return options.Run(cmd)
 		},
 	}
 	flags := cmd.Flags()
 	flags.StringVar(&options.Context, "context", "", "The context to use to login")
-	flags.Var(duration.NewFlag(&options.RefreshDuration), "refresh-duration", "refresh_token duration, for example 1h or 1d.")
-	flags.Var(duration.NewFlag(&options.AccessDuration), "duration", "access_token duration, for example 1h or 1d.")
+	flags.Var(duration.NewFlag(&options.RefreshDuration), "refresh-duration", "refresh_token duration of a password login, for example 1h or 1d.")
+	flags.Var(duration.NewFlag(&options.AccessDuration), "duration", "access_token duration of a password login, for example 1h or 1d.")
+	flags.StringVar(&options.Auth, "auth", "", "the login method, openid or password; openid when the cluster offers it, password otherwise")
+	flags.BoolVar(&options.Device, "device", false, "log in at the openid issuer with a device code, from a browser anywhere, rather than with the browser of this machine")
+	flags.StringVar(&options.Cache, "cache", "", "where the openid tokens are kept: keyring, agent (a file encrypted with a key of the ssh-agent) or file; the first usable one by default")
 
 	return cmd
 }
@@ -4788,7 +4896,7 @@ func newCmdObjectEnter(kind string) *cobra.Command {
 		Short: "open a shell in a container resource",
 		Long:  "Enter any container resource. Use --rid to specify which container to enter.",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return options.Run(kind)
+			return quietExitStatus(cmd, options.Run(kind))
 		},
 	}
 	flags := cmd.Flags()

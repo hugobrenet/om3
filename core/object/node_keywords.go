@@ -10,6 +10,7 @@ import (
 	"github.com/opensvc/om3/v3/daemon/daemonenv"
 	"github.com/opensvc/om3/v3/util/converters"
 	"github.com/opensvc/om3/v3/util/key"
+	"github.com/opensvc/om3/v3/util/sizeconv"
 )
 
 const (
@@ -231,21 +232,25 @@ var (
 		Section:   "node",
 		Text:      keywords.NewText(fs, "text/kw/node/node.secure_fetch"),
 	}
-	kwNodeMinAvailMemPct = keywords.Keyword{
-		Aliases:   []string{"min_avail_mem"},
-		Converter: converters.Int,
-		Default:   "2",
-		Option:    "min_avail_mem_pct",
+	kwNodeMinAvailMem = keywords.Keyword{
+		Aliases:   []string{"min_avail_mem_pct"},
+		Converter: converters.Share,
+		Default:   "2%",
+		Example:   "2Gi",
+		Option:    "min_avail_mem",
 		Section:   "node",
-		Text:      keywords.NewText(fs, "text/kw/node/node.min_avail_mem_pct"),
+		Validate:  validShare,
+		Text:      keywords.NewText(fs, "text/kw/node/node.min_avail_mem"),
 	}
-	kwNodeMinAvailSwapPct = keywords.Keyword{
-		Aliases:   []string{"min_avail_swap"},
-		Converter: converters.Int,
-		Default:   "10",
-		Option:    "min_avail_swap_pct",
+	kwNodeMinAvailSwap = keywords.Keyword{
+		Aliases:   []string{"min_avail_swap_pct"},
+		Converter: converters.Share,
+		Default:   "10%",
+		Example:   "4Gi",
+		Option:    "min_avail_swap",
 		Section:   "node",
-		Text:      keywords.NewText(fs, "text/kw/node/node.min_avail_swap_pct"),
+		Validate:  validShare,
+		Text:      keywords.NewText(fs, "text/kw/node/node.min_avail_swap"),
 	}
 	kwNodeEnv = keywords.Keyword{
 		Default: "TST",
@@ -253,30 +258,18 @@ var (
 		Section: "node",
 		Text:    keywords.NewText(fs, "text/kw/node/node.env"),
 	}
-	kwNodeConsoleMaxGreetTimeout = keywords.Keyword{
-		Converter: converters.Duration,
-		Option:    "max_greet_timeout",
-		Section:   "console",
-		Default:   "20s",
-		Text:      keywords.NewText(fs, "text/kw/node/console.max_greet_timeout"),
-	}
-	kwNodeConsoleMaxSeats = keywords.Keyword{
+	kwNodeConsolePort = keywords.Keyword{
 		Converter: converters.Int,
-		Option:    "max_seats",
+		Option:    "port",
 		Section:   "console",
-		Default:   "1",
-		Text:      keywords.NewText(fs, "text/kw/node/console.max_seats"),
+		Default:   "1216",
+		Text:      keywords.NewText(fs, "text/kw/node/console.port"),
 	}
-	kwNodeConsoleInsecure = keywords.Keyword{
-		Converter: converters.Bool,
-		Option:    "insecure",
-		Section:   "console",
-		Text:      keywords.NewText(fs, "text/kw/node/console.insecure"),
-	}
-	kwNodeConsoleServer = keywords.Keyword{
-		Option:  "server",
+	kwNodeConsoleURL = keywords.Keyword{
+		Option:  "url",
 		Section: "console",
-		Text:    keywords.NewText(fs, "text/kw/node/console.server"),
+		Example: "wss://access.example.com/opensvc-console/",
+		Text:    keywords.NewText(fs, "text/kw/node/console.url"),
 	}
 	kwNodeMaxParallel = keywords.Keyword{
 		Converter: converters.Int,
@@ -378,12 +371,16 @@ var (
 		Text:    keywords.NewText(fs, "text/kw/node/node.dbopensvc"),
 	}
 	kwNodeCollector = keywords.Keyword{
-		Example: "https://collector.opensvc.com",
-		Option:  "collector",
-		Section: "node",
-		Text:    keywords.NewText(fs, "text/kw/node/node.collector"),
+		Deprecated: "v3.0.0-rc44",
+		ReplacedBy: "collector.url",
+		Example:    "https://collector.opensvc.com",
+		Option:     "collector",
+		Section:    "node",
+		Text:       keywords.NewText(fs, "text/kw/node/node.collector"),
 	}
 	kwNodeCollectorServer = keywords.Keyword{
+		Deprecated:  "v3.0.0-rc44",
+		ReplacedBy:  "collector.server",
 		Example:     "https://collector.opensvc.com/server",
 		Option:      "collector_server",
 		Section:     "node",
@@ -391,6 +388,8 @@ var (
 		DefaultText: keywords.NewText(fs, "text/kw/node/node.collector_server.default"),
 	}
 	kwNodeCollectorFeeder = keywords.Keyword{
+		Deprecated:  "v3.0.0-rc44",
+		ReplacedBy:  "collector.feeder",
 		Example:     "https://collector.opensvc.com/feeder",
 		Option:      "collector_feeder",
 		Section:     "node",
@@ -398,29 +397,103 @@ var (
 		DefaultText: keywords.NewText(fs, "text/kw/node/node.collector_feeder.default"),
 	}
 	kwNodeCollectorPingInterval = keywords.Keyword{
-		Example:   "120s",
-		Option:    "collector_ping_interval",
-		Aliases:   []string{"db_min_ping_interval"},
-		Section:   "node",
-		Converter: converters.Duration,
-		Default:   "60s",
-		Text:      keywords.NewText(fs, "text/kw/node/node.collector_ping_interval"),
+		Deprecated: "v3.0.0-rc44",
+		ReplacedBy: "collector.ping_interval",
+		Example:    "120s",
+		Option:     "collector_ping_interval",
+		Aliases:    []string{"db_min_ping_interval"},
+		Section:    "node",
+		Converter:  converters.Duration,
+		Default:    "60s",
+		Text:       keywords.NewText(fs, "text/kw/node/node.collector_ping_interval"),
 	}
 	kwNodeCollectorStatusDelay = keywords.Keyword{
-		Example:   "30s",
-		Option:    "collector_status_delay",
-		Aliases:   []string{"db_min_update_interval"},
-		Section:   "node",
-		Converter: converters.Duration,
-		Default:   "10s",
-		Text:      keywords.NewText(fs, "text/kw/node/node.collector_status_delay"),
+		Deprecated: "v3.0.0-rc44",
+		ReplacedBy: "collector.status_delay",
+		Example:    "30s",
+		Option:     "collector_status_delay",
+		Aliases:    []string{"db_min_update_interval"},
+		Section:    "node",
+		Converter:  converters.Duration,
+		Default:    "10s",
+		Text:       keywords.NewText(fs, "text/kw/node/node.collector_status_delay"),
 	}
 	kwNodeCollectorTimeout = keywords.Keyword{
-		Option:    "collector_timeout",
-		Section:   "node",
+		Deprecated: "v3.0.0-rc44",
+		ReplacedBy: "collector.timeout",
+		Option:     "collector_timeout",
+		Section:    "node",
+		Converter:  converters.Duration,
+		Default:    "5s",
+		Text:       keywords.NewText(fs, "text/kw/node/node.collector_timeout"),
+	}
+	kwCollectorURL = keywords.Keyword{
+		Example: "https://collector.opensvc.com",
+		Option:  "url",
+		Section: "collector",
+		Since:   "v3.0.0-rc44",
+		Text:    keywords.NewText(fs, "text/kw/node/collector.url"),
+	}
+	kwCollectorServer = keywords.Keyword{
+		Example:     "https://collector.opensvc.com/server",
+		Option:      "server",
+		Section:     "collector",
+		Since:       "v3.0.0-rc44",
+		Text:        keywords.NewText(fs, "text/kw/node/collector.server"),
+		DefaultText: keywords.NewText(fs, "text/kw/node/collector.server.default"),
+	}
+	kwCollectorFeeder = keywords.Keyword{
+		Example:     "https://collector.opensvc.com/feeder",
+		Option:      "feeder",
+		Section:     "collector",
+		Since:       "v3.0.0-rc44",
+		Text:        keywords.NewText(fs, "text/kw/node/collector.feeder"),
+		DefaultText: keywords.NewText(fs, "text/kw/node/collector.feeder.default"),
+	}
+	kwCollectorPingInterval = keywords.Keyword{
+		Example:   "120s",
+		Option:    "ping_interval",
+		Section:   "collector",
+		Since:     "v3.0.0-rc44",
+		Converter: converters.Duration,
+		Default:   "60s",
+		Text:      keywords.NewText(fs, "text/kw/node/collector.ping_interval"),
+	}
+	kwCollectorStatusDelay = keywords.Keyword{
+		Example:   "30s",
+		Option:    "status_delay",
+		Section:   "collector",
+		Since:     "v3.0.0-rc44",
+		Converter: converters.Duration,
+		Default:   "10s",
+		Text:      keywords.NewText(fs, "text/kw/node/collector.status_delay"),
+	}
+	kwCollectorTimeout = keywords.Keyword{
+		Example:   "10s",
+		Option:    "timeout",
+		Section:   "collector",
+		Since:     "v3.0.0-rc44",
 		Converter: converters.Duration,
 		Default:   "5s",
-		Text:      keywords.NewText(fs, "text/kw/node/node.collector_timeout"),
+		Text:      keywords.NewText(fs, "text/kw/node/collector.timeout"),
+	}
+	kwCollectorActionBatch = keywords.Keyword{
+		Example:   "200",
+		Option:    "action_batch",
+		Section:   "collector",
+		Since:     "v3.0.0-rc44",
+		Converter: converters.Int,
+		Default:   "100",
+		Text:      keywords.NewText(fs, "text/kw/node/collector.action_batch"),
+	}
+	kwCollectorActionLogTimeout = keywords.Keyword{
+		Example:   "30s",
+		Option:    "action_log_timeout",
+		Section:   "collector",
+		Since:     "v3.0.0-rc44",
+		Converter: converters.Duration,
+		Default:   "10s",
+		Text:      keywords.NewText(fs, "text/kw/node/collector.action_log_timeout"),
 	}
 	kwNodeDBInsecure = keywords.Keyword{
 		Converter: converters.Bool,
@@ -525,6 +598,19 @@ var (
 		Section: "packages",
 		Text:    keywords.NewText(fs, "text/kw/node/packages.schedule"),
 	}
+	kwNodeStatsSchedule = keywords.Keyword{
+		Default: "~00:00-06:00",
+		Option:  "schedule",
+		Section: "stats",
+		Text:    keywords.NewText(fs, "text/kw/node/stats.schedule"),
+	}
+	kwNodeStatsDisable = keywords.Keyword{
+		Converter: converters.List,
+		Example:   "blockdev mem_u",
+		Option:    "disable",
+		Section:   "stats",
+		Text:      keywords.NewText(fs, "text/kw/node/stats.disable"),
+	}
 	kwNodeAssetSchedule = keywords.Keyword{
 		Default: "~00:00-06:00",
 		Option:  "schedule",
@@ -586,6 +672,22 @@ var (
 		Option:  "openid_client_id",
 		Section: "listener",
 		Text:    keywords.NewText(fs, "text/kw/node/listener.openid_client_id"),
+	}
+	kwNodeListenerTLSSecs = keywords.Keyword{
+		Converter: converters.List,
+		Example:   "system/sec/public",
+		Option:    "tls_secs",
+		Section:   "listener",
+		Since:     "v3.0.0-rc44",
+		Text:      keywords.NewText(fs, "text/kw/node/listener.tls_secs"),
+	}
+	kwNodeListenerACMEPort = keywords.Keyword{
+		Converter: converters.Int,
+		Example:   "80",
+		Option:    "acme_port",
+		Section:   "listener",
+		Since:     "v3.0.0-rc44",
+		Text:      keywords.NewText(fs, "text/kw/node/listener.acme_port"),
 	}
 	kwNodeListenerRateLimiterRate = keywords.Keyword{
 		Default:   "20",
@@ -1755,13 +1857,11 @@ var (
 	nodeCommonKeywords = []*keywords.Keyword{
 		&kwNodeComment,
 		&kwNodeSecureFetch,
-		&kwNodeMinAvailMemPct,
-		&kwNodeMinAvailSwapPct,
+		&kwNodeMinAvailMem,
+		&kwNodeMinAvailSwap,
 		&kwNodeEnv,
-		&kwNodeConsoleMaxGreetTimeout,
-		&kwNodeConsoleMaxSeats,
-		&kwNodeConsoleInsecure,
-		&kwNodeConsoleServer,
+		&kwNodeConsolePort,
+		&kwNodeConsoleURL,
 		&kwNodeMaxParallel,
 		&kwNodeMaxKeySize,
 		&kwNodeAllowedNetworks,
@@ -1787,6 +1887,14 @@ var (
 		&kwNodeCollectorPingInterval,
 		&kwNodeCollectorStatusDelay,
 		&kwNodeCollectorTimeout,
+		&kwCollectorURL,
+		&kwCollectorServer,
+		&kwCollectorFeeder,
+		&kwCollectorPingInterval,
+		&kwCollectorStatusDelay,
+		&kwCollectorTimeout,
+		&kwCollectorActionBatch,
+		&kwCollectorActionLogTimeout,
 		&kwNodeBranch,
 		&kwNodeRepo,
 		&kwNodeRepoPkg,
@@ -1802,6 +1910,8 @@ var (
 		&kwNodeComplianceAutoUpdate,
 		&kwNodeChecksSchedule,
 		&kwNodePackagesSchedule,
+		&kwNodeStatsSchedule,
+		&kwNodeStatsDisable,
 		&kwNodeAssetSchedule,
 		&kwNodeDisksSchedule,
 		&kwNodeListenerCRL,
@@ -1814,6 +1924,8 @@ var (
 		&kwNodeListenerRateLimiterRate,
 		&kwNodeListenerRateLimiterBurst,
 		&kwNodeListenerRateLimiterExpires,
+		&kwNodeListenerTLSSecs,
+		&kwNodeListenerACMEPort,
 		&kwNodeSyslogFacility,
 		&kwNodeSyslogLevel,
 		&kwNodeSyslogHost,
@@ -1970,6 +2082,13 @@ var (
 )
 
 var NodeKeywordStore = keywords.Store(append(nodePrivateKeywords, nodeCommonKeywords...))
+
+// validShare refuses a value that is neither a percentage nor a size, which
+// would set no minimum where one was asked for.
+func validShare(value string) error {
+	_, err := sizeconv.ParseShare(value)
+	return err
+}
 
 func (t Node) KeywordLookup(k key.T, sectionType string) *keywords.Keyword {
 	return keywordLookup(NodeKeywordStore, k, naming.KindInvalid, sectionType)
