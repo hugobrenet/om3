@@ -8,7 +8,6 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/opensvc/om3/v3/core/cluster"
 	"github.com/opensvc/om3/v3/core/object"
 	"github.com/opensvc/om3/v3/daemon/api"
 	"github.com/opensvc/om3/v3/daemon/daemonauth"
@@ -148,8 +147,6 @@ func (a *DaemonAPI) createToken(username, tkUseValue string, duration time.Durat
 	for c, v := range claims {
 		xc[c] = v
 	}
-	// Cluster identity comes from the daemon, not from additional claims.
-	xc["cluster_id"] = cluster.ConfigData.Get().ID
 
 	return a.JWTcreator.CreateToken(duration, xc)
 }
