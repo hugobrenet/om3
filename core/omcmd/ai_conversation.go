@@ -22,10 +22,10 @@ const (
 )
 
 type aiConversationClient interface {
-	ListConversations(context.Context, string) ([]clientai.Conversation, error)
-	GetConversation(context.Context, string, string) (clientai.Conversation, error)
-	UpdateConversationTitle(context.Context, string, string, string) (clientai.Conversation, error)
-	DeleteConversation(context.Context, string, string) error
+	ListConversations(context.Context, clientai.Credential) ([]clientai.Conversation, error)
+	GetConversation(context.Context, clientai.Credential, string) (clientai.Conversation, error)
+	UpdateConversationTitle(context.Context, clientai.Credential, string, string) (clientai.Conversation, error)
+	DeleteConversation(context.Context, clientai.Credential, string) error
 }
 
 type aiConversationClientFactory func() (aiConversationClient, error)
@@ -75,9 +75,9 @@ func conversationItems(items []clientai.Conversation) unstructured.List {
 	return result
 }
 
-func (o *OptsAIConversation) prepare(parent context.Context) (context.Context, context.CancelFunc, string, aiConversationClient, error) {
+func (o *OptsAIConversation) prepare(parent context.Context) (context.Context, context.CancelFunc, clientai.Credential, aiConversationClient, error) {
 	if o.Timeout < minimumAIConversationTimeout || o.Timeout > maximumAIConversationTimeout {
-		return nil, nil, "", nil, fmt.Errorf("timeout must be between %s and %s", minimumAIConversationTimeout, maximumAIConversationTimeout)
+		return nil, nil, clientai.Credential{}, nil, fmt.Errorf("timeout must be between %s and %s", minimumAIConversationTimeout, maximumAIConversationTimeout)
 	}
 	if o.Out == nil {
 		o.Out = os.Stdout
@@ -98,14 +98,14 @@ func (o *OptsAIConversation) prepare(parent context.Context) (context.Context, c
 	client, err := o.newAIConversationClient()
 	if err != nil {
 		cancel()
-		return nil, nil, "", nil, fmt.Errorf("create AI agent client: %w", err)
+		return nil, nil, clientai.Credential{}, nil, fmt.Errorf("create AI agent client: %w", err)
 	}
-	token, err := issueAIAccessToken(ctx, o.Timeout, o.newAuthTokenClient)
+	cred, err := issueAICredential(ctx, o.Timeout, o.newAuthTokenClient)
 	if err != nil {
 		cancel()
-		return nil, nil, "", nil, err
+		return nil, nil, clientai.Credential{}, nil, err
 	}
-	return ctx, cancel, token, client, nil
+	return ctx, cancel, cred, client, nil
 }
 
 func (o *OptsAIConversation) render(data any) error {

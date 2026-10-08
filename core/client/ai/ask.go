@@ -60,11 +60,11 @@ func (e *StreamError) Error() string {
 	return message
 }
 
-func (c *Client) Ask(ctx context.Context, token string, prompt string, emit EmitFunc) (string, error) {
-	return c.streamPrompt(ctx, askPath, token, prompt, emit)
+func (c *Client) Ask(ctx context.Context, cred Credential, prompt string, emit EmitFunc) (string, error) {
+	return c.streamPrompt(ctx, askPath, cred, prompt, emit)
 }
 
-func (c *Client) streamPrompt(ctx context.Context, path string, token string, prompt string, emit EmitFunc) (string, error) {
+func (c *Client) streamPrompt(ctx context.Context, path string, cred Credential, prompt string, emit EmitFunc) (string, error) {
 	if strings.TrimSpace(prompt) == "" {
 		return "", fmt.Errorf("ai agent prompt is empty")
 	}
@@ -80,7 +80,7 @@ func (c *Client) streamPrompt(ctx context.Context, path string, token string, pr
 	if err != nil {
 		return "", fmt.Errorf("encode ai agent request: %w", err)
 	}
-	request, err := c.newAuthenticatedRequest(ctx, http.MethodPost, path, token, bytes.NewReader(body))
+	request, err := c.newAuthenticatedRequest(ctx, http.MethodPost, path, cred, bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
@@ -94,13 +94,13 @@ func (c *Client) streamPrompt(ctx context.Context, path string, token string, pr
 	defer response.Body.Close()
 	requestID := response.Header.Get(requestIDResponseHeader)
 	if response.StatusCode != http.StatusOK {
-		return requestID, decodeAPIError(response, requestID, token)
+		return requestID, decodeAPIError(response, requestID, cred.Token)
 	}
 	mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
 	if err != nil || mediaType != "text/event-stream" {
 		return requestID, fmt.Errorf("ai agent response Content-Type is not text/event-stream (request_id=%s)", requestID)
 	}
-	if err := consumeStream(response.Body, requestID, token, emit); err != nil {
+	if err := consumeStream(response.Body, requestID, cred.Token, emit); err != nil {
 		return requestID, err
 	}
 	return requestID, nil

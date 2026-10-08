@@ -20,12 +20,12 @@ func (t *CmdAIList) Run(ctx context.Context) error {
 }
 
 func (t *CmdAIList) run(parent context.Context) error {
-	ctx, cancel, token, client, err := t.prepare(parent)
+	ctx, cancel, cred, client, err := t.prepare(parent)
 	if err != nil {
 		return err
 	}
 	defer cancel()
-	items, err := client.ListConversations(ctx, token)
+	items, err := client.ListConversations(ctx, cred)
 	if err != nil {
 		return err
 	}

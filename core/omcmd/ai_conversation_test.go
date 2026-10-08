@@ -27,28 +27,28 @@ type fakeAIConversationClient struct {
 	hasDeadline bool
 }
 
-func (c *fakeAIConversationClient) ListConversations(ctx context.Context, token string) ([]clientai.Conversation, error) {
-	c.token = token
+func (c *fakeAIConversationClient) ListConversations(ctx context.Context, cred clientai.Credential) ([]clientai.Conversation, error) {
+	c.token = cred.Token
 	_, c.hasDeadline = ctx.Deadline()
 	return c.items, c.listErr
 }
 
-func (c *fakeAIConversationClient) GetConversation(ctx context.Context, token string, id string) (clientai.Conversation, error) {
-	c.token = token
+func (c *fakeAIConversationClient) GetConversation(ctx context.Context, cred clientai.Credential, id string) (clientai.Conversation, error) {
+	c.token = cred.Token
 	c.getID = id
 	_, c.hasDeadline = ctx.Deadline()
 	return c.item, c.getErr
 }
 
-func (c *fakeAIConversationClient) DeleteConversation(ctx context.Context, token string, id string) error {
-	c.token = token
+func (c *fakeAIConversationClient) DeleteConversation(ctx context.Context, cred clientai.Credential, id string) error {
+	c.token = cred.Token
 	c.deleteID = id
 	_, c.hasDeadline = ctx.Deadline()
 	return c.deleteErr
 }
 
-func (c *fakeAIConversationClient) UpdateConversationTitle(ctx context.Context, token string, id string, title string) (clientai.Conversation, error) {
-	c.token = token
+func (c *fakeAIConversationClient) UpdateConversationTitle(ctx context.Context, cred clientai.Credential, id string, title string) (clientai.Conversation, error) {
+	c.token = cred.Token
 	c.updateID = id
 	c.updateTitle = title
 	_, c.hasDeadline = ctx.Deadline()

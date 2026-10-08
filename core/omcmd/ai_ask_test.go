@@ -13,13 +13,15 @@ import (
 
 type fakeAIAgentClient struct {
 	token       string
+	clusterID   string
 	prompt      string
 	hasDeadline bool
 	err         error
 }
 
-func (c *fakeAIAgentClient) Ask(ctx context.Context, token string, prompt string, emit clientai.EmitFunc) (string, error) {
-	c.token = token
+func (c *fakeAIAgentClient) Ask(ctx context.Context, cred clientai.Credential, prompt string, emit clientai.EmitFunc) (string, error) {
+	c.token = cred.Token
+	c.clusterID = cred.ClusterID
 	c.prompt = prompt
 	_, c.hasDeadline = ctx.Deadline()
 	if c.err != nil {
@@ -63,6 +65,9 @@ func TestCmdAIAskGetsTokenAndStreamsAgentResponse(t *testing.T) {
 	}
 	if tokenClient.duration != (time.Minute + 2*time.Second).String() {
 		t.Fatalf("token duration = %q", tokenClient.duration)
+	}
+	if agentClient.clusterID != testAIClusterID {
+		t.Fatalf("agent call cluster ID = %q", agentClient.clusterID)
 	}
 	if agentClient.token != token || agentClient.prompt != command.Prompt || !agentClient.hasDeadline {
 		t.Fatalf("agent call token=%q prompt=%q deadline=%v", agentClient.token, agentClient.prompt, agentClient.hasDeadline)

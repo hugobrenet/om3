@@ -19,7 +19,7 @@ const (
 var ErrCmdAIAsk = errors.New("command ai ask")
 
 type aiAgentClient interface {
-	Ask(context.Context, string, string, clientai.EmitFunc) (string, error)
+	Ask(context.Context, clientai.Credential, string, clientai.EmitFunc) (string, error)
 }
 
 type CmdAIAsk struct {
@@ -60,7 +60,7 @@ func (t *CmdAIAsk) run(parent context.Context) error {
 
 	ctx, cancel := context.WithTimeout(parent, t.Timeout)
 	defer cancel()
-	token, err := issueAIAccessToken(ctx, t.Timeout, t.newAuthTokenClient)
+	cred, err := issueAICredential(ctx, t.Timeout, t.newAuthTokenClient)
 	if err != nil {
 		return err
 	}
@@ -70,7 +70,7 @@ func (t *CmdAIAsk) run(parent context.Context) error {
 	}
 
 	stream := newAIStreamWriter(t.Out, t.ErrOut)
-	_, err = agentClient.Ask(ctx, token, t.Prompt, stream.emit)
+	_, err = agentClient.Ask(ctx, cred, t.Prompt, stream.emit)
 	stream.finish()
 	if err != nil {
 		return err

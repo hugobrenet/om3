@@ -25,16 +25,16 @@ type fakeAIChatClient struct {
 	err           error
 }
 
-func (c *fakeAIChatClient) CreateConversation(_ context.Context, token string) (clientai.Conversation, error) {
-	c.createToken = token
+func (c *fakeAIChatClient) CreateConversation(_ context.Context, cred clientai.Credential) (clientai.Conversation, error) {
+	c.createToken = cred.Token
 	if c.err != nil {
 		return clientai.Conversation{}, c.err
 	}
 	return c.conversation, nil
 }
 
-func (c *fakeAIChatClient) GetConversation(_ context.Context, token string, id string) (clientai.Conversation, error) {
-	c.getToken = token
+func (c *fakeAIChatClient) GetConversation(_ context.Context, cred clientai.Credential, id string) (clientai.Conversation, error) {
+	c.getToken = cred.Token
 	c.getID = id
 	if c.err != nil {
 		return clientai.Conversation{}, c.err
@@ -42,16 +42,16 @@ func (c *fakeAIChatClient) GetConversation(_ context.Context, token string, id s
 	return c.conversation, nil
 }
 
-func (c *fakeAIChatClient) ListConversations(_ context.Context, token string) ([]clientai.Conversation, error) {
-	c.listToken = token
+func (c *fakeAIChatClient) ListConversations(_ context.Context, cred clientai.Credential) ([]clientai.Conversation, error) {
+	c.listToken = cred.Token
 	if c.err != nil {
 		return nil, c.err
 	}
 	return c.conversations, nil
 }
 
-func (c *fakeAIChatClient) SendConversationTurn(ctx context.Context, token string, _ string, prompt string, emit clientai.EmitFunc) (string, error) {
-	c.turnTokens = append(c.turnTokens, token)
+func (c *fakeAIChatClient) SendConversationTurn(ctx context.Context, cred clientai.Credential, _ string, prompt string, emit clientai.EmitFunc) (string, error) {
+	c.turnTokens = append(c.turnTokens, cred.Token)
 	c.turnPrompts = append(c.turnPrompts, prompt)
 	if c.turn != nil {
 		return "request-turn", c.turn(ctx, emit)

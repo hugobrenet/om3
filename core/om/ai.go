@@ -7,7 +7,6 @@ import (
 	"strings"
 	"syscall"
 
-	clientai "github.com/opensvc/om3/v3/core/client/ai"
 	"github.com/opensvc/om3/v3/core/commoncmd"
 	"github.com/opensvc/om3/v3/core/omcmd"
 	"github.com/spf13/cobra"
@@ -31,13 +30,14 @@ conversation. The show command returns conversation metadata only;
 conversation messages are not exposed by the agent API. Conversations expire
 automatically.
 
-The agent is reached over HTTPS on TCP. By default, the client connects to
-` + clientai.DefaultAgentURL + `. OPENSVC_AI_AGENT_URL overrides that address.
-OPENSVC_AI_AGENT_CA_FILE optionally selects a PEM CA bundle for a private TLS
-certificate; otherwise system roots are used. Certificates and hostnames are
-always verified. The URL must not contain a path, credentials, query or fragment.
+The agent runs in your infrastructure and is reached over HTTPS on TCP at the
+address set by OPENSVC_AI_AGENT_URL, which is required. OPENSVC_AI_AGENT_CA_FILE
+optionally selects a PEM CA bundle for a private TLS certificate; otherwise
+system roots are used. Certificates and hostnames are always verified. The URL
+must not contain a path, credentials, query or fragment.
 There is no local or Unix-socket fallback. OpenSVC access tokens are still
-issued by the daemon; no new OAuth login is introduced.`,
+issued by the daemon; no new OAuth login is introduced. Each request carries the
+daemon-issued token and the ID of the cluster that issued it.`,
 		Example: `  om ai ask "Assess the health of my cluster"
   om ai chat
   om ai chat --resume

@@ -43,9 +43,9 @@ type conversationTitleRequest struct {
 	Title string `json:"title"`
 }
 
-func (c *Client) CreateConversation(ctx context.Context, token string) (Conversation, error) {
+func (c *Client) CreateConversation(ctx context.Context, cred Credential) (Conversation, error) {
 	var payload conversationEnvelope
-	if err := c.doJSON(ctx, http.MethodPost, conversationsPath, token, http.StatusCreated, &payload); err != nil {
+	if err := c.doJSON(ctx, http.MethodPost, conversationsPath, cred, http.StatusCreated, &payload); err != nil {
 		return Conversation{}, err
 	}
 	if err := validateConversation(payload.Conversation); err != nil {
@@ -54,9 +54,9 @@ func (c *Client) CreateConversation(ctx context.Context, token string) (Conversa
 	return payload.Conversation, nil
 }
 
-func (c *Client) ListConversations(ctx context.Context, token string) ([]Conversation, error) {
+func (c *Client) ListConversations(ctx context.Context, cred Credential) ([]Conversation, error) {
 	var payload conversationListEnvelope
-	if err := c.doJSON(ctx, http.MethodGet, conversationsPath, token, http.StatusOK, &payload); err != nil {
+	if err := c.doJSON(ctx, http.MethodGet, conversationsPath, cred, http.StatusOK, &payload); err != nil {
 		return nil, err
 	}
 	if len(payload.Conversations) > maxConversationListItems {
@@ -78,12 +78,12 @@ func (c *Client) ListConversations(ctx context.Context, token string) ([]Convers
 	return payload.Conversations, nil
 }
 
-func (c *Client) GetConversation(ctx context.Context, token string, id string) (Conversation, error) {
+func (c *Client) GetConversation(ctx context.Context, cred Credential, id string) (Conversation, error) {
 	if err := validateConversationID(id); err != nil {
 		return Conversation{}, err
 	}
 	var payload conversationEnvelope
-	if err := c.doJSON(ctx, http.MethodGet, conversationPath(id), token, http.StatusOK, &payload); err != nil {
+	if err := c.doJSON(ctx, http.MethodGet, conversationPath(id), cred, http.StatusOK, &payload); err != nil {
 		return Conversation{}, err
 	}
 	if err := validateConversation(payload.Conversation); err != nil {
@@ -95,11 +95,11 @@ func (c *Client) GetConversation(ctx context.Context, token string, id string) (
 	return payload.Conversation, nil
 }
 
-func (c *Client) DeleteConversation(ctx context.Context, token string, id string) error {
+func (c *Client) DeleteConversation(ctx context.Context, cred Credential, id string) error {
 	if err := validateConversationID(id); err != nil {
 		return err
 	}
-	request, err := c.newAuthenticatedRequest(ctx, http.MethodDelete, conversationPath(id), token, nil)
+	request, err := c.newAuthenticatedRequest(ctx, http.MethodDelete, conversationPath(id), cred, nil)
 	if err != nil {
 		return err
 	}
@@ -110,12 +110,12 @@ func (c *Client) DeleteConversation(ctx context.Context, token string, id string
 	}
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusNoContent {
-		return decodeAPIError(response, response.Header.Get(requestIDResponseHeader), token)
+		return decodeAPIError(response, response.Header.Get(requestIDResponseHeader), cred.Token)
 	}
 	return nil
 }
 
-func (c *Client) UpdateConversationTitle(ctx context.Context, token string, id string, title string) (Conversation, error) {
+func (c *Client) UpdateConversationTitle(ctx context.Context, cred Credential, id string, title string) (Conversation, error) {
 	if err := validateConversationID(id); err != nil {
 		return Conversation{}, err
 	}
@@ -128,7 +128,7 @@ func (c *Client) UpdateConversationTitle(ctx context.Context, token string, id s
 		return Conversation{}, fmt.Errorf("encode ai agent conversation title request: %w", err)
 	}
 	var payload conversationEnvelope
-	if err := c.doJSONRequest(ctx, http.MethodPatch, conversationPath(id), token, http.StatusOK, bytes.NewReader(body), &payload); err != nil {
+	if err := c.doJSONRequest(ctx, http.MethodPatch, conversationPath(id), cred, http.StatusOK, bytes.NewReader(body), &payload); err != nil {
 		return Conversation{}, err
 	}
 	if err := validateConversation(payload.Conversation); err != nil {
@@ -143,19 +143,19 @@ func (c *Client) UpdateConversationTitle(ctx context.Context, token string, id s
 	return payload.Conversation, nil
 }
 
-func (c *Client) SendConversationTurn(ctx context.Context, token string, id string, prompt string, emit EmitFunc) (string, error) {
+func (c *Client) SendConversationTurn(ctx context.Context, cred Credential, id string, prompt string, emit EmitFunc) (string, error) {
 	if err := validateConversationID(id); err != nil {
 		return "", err
 	}
-	return c.streamPrompt(ctx, conversationTurnPath(id), token, prompt, emit)
+	return c.streamPrompt(ctx, conversationTurnPath(id), cred, prompt, emit)
 }
 
-func (c *Client) doJSON(ctx context.Context, method string, path string, token string, expectedStatus int, target any) error {
-	return c.doJSONRequest(ctx, method, path, token, expectedStatus, nil, target)
+func (c *Client) doJSON(ctx context.Context, method string, path string, cred Credential, expectedStatus int, target any) error {
+	return c.doJSONRequest(ctx, method, path, cred, expectedStatus, nil, target)
 }
 
-func (c *Client) doJSONRequest(ctx context.Context, method string, path string, token string, expectedStatus int, requestBody io.Reader, target any) error {
-	request, err := c.newAuthenticatedRequest(ctx, method, path, token, requestBody)
+func (c *Client) doJSONRequest(ctx context.Context, method string, path string, cred Credential, expectedStatus int, requestBody io.Reader, target any) error {
+	request, err := c.newAuthenticatedRequest(ctx, method, path, cred, requestBody)
 	if err != nil {
 		return err
 	}
@@ -170,7 +170,7 @@ func (c *Client) doJSONRequest(ctx context.Context, method string, path string, 
 	defer response.Body.Close()
 	requestID := response.Header.Get(requestIDResponseHeader)
 	if response.StatusCode != expectedStatus {
-		return decodeAPIError(response, requestID, token)
+		return decodeAPIError(response, requestID, cred.Token)
 	}
 	mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
 	if err != nil || mediaType != "application/json" {

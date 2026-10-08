@@ -5,8 +5,15 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 )
+
+const testClusterID = "00000000-0000-4000-8000-000000000001"
+
+func testCredential(token string) Credential {
+	return Credential{Token: token, ClusterID: testClusterID}
+}
 
 func newTestClient(baseURL string, httpClient *http.Client) (*Client, error) {
 	parsed, err := url.Parse(baseURL)
@@ -46,14 +53,19 @@ func clearAgentEnv(t *testing.T) {
 	}
 }
 
-func TestNewUsesDefaultRemoteURL(t *testing.T) {
+func TestNewRequiresAgentURL(t *testing.T) {
 	clearAgentEnv(t)
+	if _, err := New(); err == nil || !strings.Contains(err.Error(), agentURLEnv) {
+		t.Fatalf("missing agent URL accepted: %v", err)
+	}
+}
+
+func TestNewUsesSystemTrustWithoutProxy(t *testing.T) {
+	clearAgentEnv(t)
+	t.Setenv(agentURLEnv, "https://agent.example.test")
 	client, err := New()
 	if err != nil {
 		t.Fatal(err)
-	}
-	if got := client.baseURL.String(); got != DefaultAgentURL {
-		t.Fatalf("default URL = %q", got)
 	}
 	transport := client.httpClient.Transport.(agentOriginTransport).base.(*http.Transport)
 	if transport.Proxy != nil {
@@ -71,7 +83,7 @@ func TestNewUsesHTTPSURLFromEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request, err := client.newAuthenticatedRequest(t.Context(), http.MethodGet, "/health", "test-token", nil)
+	request, err := client.newAuthenticatedRequest(t.Context(), http.MethodGet, "/health", testCredential("test-token"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,6 +92,21 @@ func TestNewUsesHTTPSURLFromEnvironment(t *testing.T) {
 	}
 	if request.Header.Get("Authorization") != "Bearer test-token" {
 		t.Fatal("missing bearer token")
+	}
+	if request.Header.Get("X-OpenSVC-Cluster-ID") != testClusterID {
+		t.Fatal("missing cluster ID header")
+	}
+}
+
+func TestAuthenticatedRequestRejectsInvalidClusterID(t *testing.T) {
+	client, err := newTestClient("http://127.0.0.1:1", http.DefaultClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"", " " + testClusterID, "a,b", "a\nb", strings.Repeat("a", maxClusterIDBytes+1)} {
+		if _, err := client.newAuthenticatedRequest(t.Context(), http.MethodGet, "/health", Credential{Token: "token", ClusterID: id}, nil); err == nil {
+			t.Fatalf("cluster ID %q accepted", id)
+		}
 	}
 }
 

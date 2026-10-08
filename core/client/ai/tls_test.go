@@ -78,7 +78,7 @@ func TestNewUsesOptionalCAFileFromEnvironment(t *testing.T) {
 	if transport.TLSClientConfig.MinVersion != tls.VersionTLS12 || transport.TLSClientConfig.InsecureSkipVerify {
 		t.Fatal("unsafe TLS configuration")
 	}
-	request, err := client.newAuthenticatedRequest(t.Context(), http.MethodGet, "/health", "test-token", nil)
+	request, err := client.newAuthenticatedRequest(t.Context(), http.MethodGet, "/health", testCredential("test-token"), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestClientRejectsUntrustedOrWrongHostnameTLS(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = client.Ask(t.Context(), "sensitive-test-token", "health", func(Event) error { return nil })
+			_, err = client.Ask(t.Context(), testCredential("sensitive-test-token"), "health", func(Event) error { return nil })
 			if err == nil || strings.Contains(err.Error(), "sensitive-test-token") {
 				t.Fatalf("TLS rejection error=%v", err)
 			}
@@ -146,7 +146,7 @@ func TestHTTPSClientRejectsRedirects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = client.Ask(t.Context(), "test-token", "health", func(Event) error { return nil })
+	_, err = client.Ask(t.Context(), testCredential("test-token"), "health", func(Event) error { return nil })
 	var apiError *APIError
 	if !errors.As(err, &apiError) || apiError.StatusCode != http.StatusTemporaryRedirect || targetCalls.Load() != 0 {
 		t.Fatalf("redirect error=%v target calls=%d", err, targetCalls.Load())
@@ -194,7 +194,7 @@ func TestHTTPSClientDisablesEnvironmentProxies(t *testing.T) {
 	if client.httpClient.Transport.(agentOriginTransport).base.(*http.Transport).Proxy != nil {
 		t.Fatal("proxy configured")
 	}
-	if err := client.DeleteConversation(t.Context(), "test-token", "conversation-1"); err != nil {
+	if err := client.DeleteConversation(t.Context(), testCredential("test-token"), "conversation-1"); err != nil {
 		t.Fatal(err)
 	}
 	if proxyCalls.Load() != 0 {
@@ -242,22 +242,22 @@ func TestHTTPSClientConversationsAndSSE(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := client.CreateConversation(t.Context(), "test-token")
+	got, err := client.CreateConversation(t.Context(), testCredential("test-token"))
 	if err != nil || got != item {
 		t.Fatalf("create=%+v err=%v", got, err)
 	}
-	items, err := client.ListConversations(t.Context(), "test-token")
+	items, err := client.ListConversations(t.Context(), testCredential("test-token"))
 	if err != nil || len(items) != 1 || items[0] != item {
 		t.Fatalf("list=%+v err=%v", items, err)
 	}
-	for _, stream := range []func(context.Context, string, string, EmitFunc) (string, error){
+	for _, stream := range []func(context.Context, Credential, string, EmitFunc) (string, error){
 		client.Ask,
-		func(ctx context.Context, token, prompt string, emit EmitFunc) (string, error) {
-			return client.SendConversationTurn(ctx, token, item.ID, prompt, emit)
+		func(ctx context.Context, cred Credential, prompt string, emit EmitFunc) (string, error) {
+			return client.SendConversationTurn(ctx, cred, item.ID, prompt, emit)
 		},
 	} {
 		var events []Event
-		requestID, err := stream(t.Context(), "test-token", "health", func(event Event) error { events = append(events, event); return nil })
+		requestID, err := stream(t.Context(), testCredential("test-token"), "health", func(event Event) error { events = append(events, event); return nil })
 		if err != nil || requestID != "tls-request" || len(events) != 2 || events[0].TextDelta != "healthy" || events[1].Type != "completed" {
 			t.Fatalf("stream=%+v id=%s err=%v", events, requestID, err)
 		}
@@ -290,7 +290,7 @@ func TestHTTPSClientPropagatesCancellation(t *testing.T) {
 	defer cancel()
 	done := make(chan error, 1)
 	go func() {
-		_, err := client.Ask(ctx, "test-token", "health", func(Event) error { return nil })
+		_, err := client.Ask(ctx, testCredential("test-token"), "health", func(Event) error { return nil })
 		done <- err
 	}()
 	select {

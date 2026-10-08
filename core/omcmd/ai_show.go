@@ -25,12 +25,12 @@ func (t *CmdAIShow) run(parent context.Context) error {
 	if strings.TrimSpace(t.ID) == "" {
 		return fmt.Errorf("conversation ID is empty")
 	}
-	ctx, cancel, token, client, err := t.prepare(parent)
+	ctx, cancel, cred, client, err := t.prepare(parent)
 	if err != nil {
 		return err
 	}
 	defer cancel()
-	item, err := client.GetConversation(ctx, token, t.ID)
+	item, err := client.GetConversation(ctx, cred, t.ID)
 	if err != nil {
 		return err
 	}

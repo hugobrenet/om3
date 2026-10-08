@@ -25,10 +25,10 @@ var (
 )
 
 type aiChatClient interface {
-	CreateConversation(context.Context, string) (clientai.Conversation, error)
-	GetConversation(context.Context, string, string) (clientai.Conversation, error)
-	ListConversations(context.Context, string) ([]clientai.Conversation, error)
-	SendConversationTurn(context.Context, string, string, string, clientai.EmitFunc) (string, error)
+	CreateConversation(context.Context, clientai.Credential) (clientai.Conversation, error)
+	GetConversation(context.Context, clientai.Credential, string) (clientai.Conversation, error)
+	ListConversations(context.Context, clientai.Credential) ([]clientai.Conversation, error)
+	SendConversationTurn(context.Context, clientai.Credential, string, string, clientai.EmitFunc) (string, error)
 }
 
 type CmdAIChat struct {
@@ -163,11 +163,11 @@ func (t *CmdAIChat) openConversation(parent context.Context, client aiChatClient
 func (t *CmdAIChat) createConversation(parent context.Context, client aiChatClient) (clientai.Conversation, error) {
 	ctx, cancel := context.WithTimeout(parent, DefaultAIConversationTimeout)
 	defer cancel()
-	token, err := issueAIAccessToken(ctx, DefaultAIConversationTimeout, t.newAuthTokenClient)
+	cred, err := issueAICredential(ctx, DefaultAIConversationTimeout, t.newAuthTokenClient)
 	if err != nil {
 		return clientai.Conversation{}, err
 	}
-	item, err := client.CreateConversation(ctx, token)
+	item, err := client.CreateConversation(ctx, cred)
 	if err != nil {
 		return clientai.Conversation{}, fmt.Errorf("create AI conversation: %w", err)
 	}
@@ -177,11 +177,11 @@ func (t *CmdAIChat) createConversation(parent context.Context, client aiChatClie
 func (t *CmdAIChat) getConversation(parent context.Context, client aiChatClient, id string) (clientai.Conversation, error) {
 	ctx, cancel := context.WithTimeout(parent, DefaultAIConversationTimeout)
 	defer cancel()
-	token, err := issueAIAccessToken(ctx, DefaultAIConversationTimeout, t.newAuthTokenClient)
+	cred, err := issueAICredential(ctx, DefaultAIConversationTimeout, t.newAuthTokenClient)
 	if err != nil {
 		return clientai.Conversation{}, err
 	}
-	item, err := client.GetConversation(ctx, token, id)
+	item, err := client.GetConversation(ctx, cred, id)
 	if err != nil {
 		return clientai.Conversation{}, fmt.Errorf("resume AI conversation: %w", err)
 	}
@@ -191,11 +191,11 @@ func (t *CmdAIChat) getConversation(parent context.Context, client aiChatClient,
 func (t *CmdAIChat) listConversations(parent context.Context, client aiChatClient) ([]clientai.Conversation, error) {
 	ctx, cancel := context.WithTimeout(parent, DefaultAIConversationTimeout)
 	defer cancel()
-	token, err := issueAIAccessToken(ctx, DefaultAIConversationTimeout, t.newAuthTokenClient)
+	cred, err := issueAICredential(ctx, DefaultAIConversationTimeout, t.newAuthTokenClient)
 	if err != nil {
 		return nil, err
 	}
-	items, err := client.ListConversations(ctx, token)
+	items, err := client.ListConversations(ctx, cred)
 	if err != nil {
 		return nil, fmt.Errorf("list AI conversations: %w", err)
 	}
@@ -300,10 +300,10 @@ func (t *CmdAIChat) runTurn(parent context.Context, client aiChatClient, convers
 	defer cancel()
 	result := make(chan error, 1)
 	go func() {
-		token, err := issueAIAccessToken(ctx, t.Timeout, t.newAuthTokenClient)
+		cred, err := issueAICredential(ctx, t.Timeout, t.newAuthTokenClient)
 		if err == nil {
 			stream := newAIStreamWriter(t.Out, t.ErrOut)
-			_, err = client.SendConversationTurn(ctx, token, conversationID, prompt, stream.emit)
+			_, err = client.SendConversationTurn(ctx, cred, conversationID, prompt, stream.emit)
 			stream.finish()
 		}
 		result <- err

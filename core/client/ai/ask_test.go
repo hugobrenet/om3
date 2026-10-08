@@ -48,7 +48,7 @@ func TestClientAskStreamsEvents(t *testing.T) {
 		t.Fatalf("new client: %v", err)
 	}
 	var events []Event
-	requestID, err := client.Ask(t.Context(), token, "health of my cluster", func(event Event) error {
+	requestID, err := client.Ask(t.Context(), testCredential(token), "health of my cluster", func(event Event) error {
 		events = append(events, event)
 		return nil
 	})
@@ -75,7 +75,7 @@ func TestClientAskReturnsBoundedAPIErrorWithoutToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
-	requestID, err := client.Ask(t.Context(), token, "health", func(Event) error { return nil })
+	requestID, err := client.Ask(t.Context(), testCredential(token), "health", func(Event) error { return nil })
 	if err == nil {
 		t.Fatal("ask succeeded")
 	}
@@ -101,7 +101,7 @@ func TestClientAskReturnsSanitizedStreamError(t *testing.T) {
 		t.Fatalf("new client: %v", err)
 	}
 	var emitted Event
-	_, err = client.Ask(t.Context(), token, "health", func(event Event) error {
+	_, err = client.Ask(t.Context(), testCredential(token), "health", func(event Event) error {
 		emitted = event
 		return nil
 	})
@@ -128,7 +128,7 @@ func TestClientAskRejectsRedirect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
-	_, err = client.Ask(t.Context(), "token", "health", func(Event) error { return nil })
+	_, err = client.Ask(t.Context(), testCredential("token"), "health", func(Event) error { return nil })
 	var apiError *APIError
 	if !errors.As(err, &apiError) || apiError.StatusCode != http.StatusTemporaryRedirect || targetCalls.Load() != 0 {
 		t.Fatalf("redirect error = %v, target calls = %d", err, targetCalls.Load())
@@ -150,7 +150,7 @@ func TestClientAskRejectsMalformedOrIncompleteStream(t *testing.T) {
 			server.Close()
 			t.Fatalf("new client: %v", err)
 		}
-		_, err = client.Ask(context.Background(), "token", "health", func(Event) error { return nil })
+		_, err = client.Ask(context.Background(), testCredential("token"), "health", func(Event) error { return nil })
 		server.Close()
 		if err == nil {
 			t.Fatalf("stream %q succeeded", body)

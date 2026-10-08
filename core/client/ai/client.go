@@ -19,7 +19,6 @@ import (
 )
 
 const (
-	DefaultAgentURL         = "https://ai-agent.opensvc.com"
 	agentURLEnv             = "OPENSVC_AI_AGENT_URL"
 	agentCAFileEnv          = "OPENSVC_AI_AGENT_CA_FILE"
 	maxCAFileBytes          = 1 << 20
@@ -27,7 +26,17 @@ const (
 	maxErrorCodeRunes       = 128
 	maxErrorMessageRunes    = 2048
 	requestIDResponseHeader = "X-Request-ID"
+	clusterIDRequestHeader  = "X-OpenSVC-Cluster-ID"
+	maxClusterIDBytes       = 256
 )
+
+// Credential authenticates agent requests: a daemon-issued access token and
+// the ID of the cluster whose daemon issued it. The agent forwards both; the
+// cluster ID only selects where the token is verified.
+type Credential struct {
+	Token     string
+	ClusterID string
+}
 
 type Client struct {
 	baseURL    *url.URL
@@ -56,9 +65,10 @@ func (e *APIError) Error() string {
 }
 
 func New() (*Client, error) {
+	// The agent runs in the operator's infrastructure: there is no default.
 	baseURL := strings.TrimSpace(os.Getenv(agentURLEnv))
 	if baseURL == "" {
-		baseURL = DefaultAgentURL
+		return nil, fmt.Errorf("%s is not set: configure the HTTPS address of the AI agent", agentURLEnv)
 	}
 	return newHTTPSClient(baseURL, strings.TrimSpace(os.Getenv(agentCAFileEnv)))
 }
@@ -150,16 +160,32 @@ func (c *Client) endpoint(path string) string {
 	return endpoint.String()
 }
 
-func (c *Client) newAuthenticatedRequest(ctx context.Context, method string, path string, token string, body io.Reader) (*http.Request, error) {
-	if strings.TrimSpace(token) == "" {
+func (c *Client) newAuthenticatedRequest(ctx context.Context, method string, path string, cred Credential, body io.Reader) (*http.Request, error) {
+	if strings.TrimSpace(cred.Token) == "" {
 		return nil, fmt.Errorf("ai agent Bearer token is empty")
+	}
+	if err := validateClusterID(cred.ClusterID); err != nil {
+		return nil, err
 	}
 	request, err := http.NewRequestWithContext(ctx, method, c.endpoint(path), body)
 	if err != nil {
 		return nil, fmt.Errorf("create ai agent request: %w", err)
 	}
-	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("Authorization", "Bearer "+cred.Token)
+	request.Header.Set(clusterIDRequestHeader, cred.ClusterID)
 	return request, nil
+}
+
+func validateClusterID(id string) error {
+	if id == "" || len(id) > maxClusterIDBytes || strings.TrimSpace(id) != id {
+		return fmt.Errorf("ai agent cluster ID must contain 1 to %d bytes without surrounding whitespace", maxClusterIDBytes)
+	}
+	for _, r := range id {
+		if r == ',' || unicode.IsControl(r) {
+			return fmt.Errorf("ai agent cluster ID contains a comma or control character")
+		}
+	}
+	return nil
 }
 
 func decodeAPIError(response *http.Response, requestID string, token string) error {

@@ -35,7 +35,7 @@ func TestClientListsConversations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
-	items, err := client.ListConversations(t.Context(), "token")
+	items, err := client.ListConversations(t.Context(), testCredential("token"))
 	if err != nil {
 		t.Fatalf("list conversations: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestClientCreatesConversation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
-	got, err := client.CreateConversation(t.Context(), "token")
+	got, err := client.CreateConversation(t.Context(), testCredential("token"))
 	if err != nil {
 		t.Fatalf("create conversation: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestClientSendsConversationTurn(t *testing.T) {
 		t.Fatalf("new client: %v", err)
 	}
 	var events []Event
-	requestID, err := client.SendConversationTurn(t.Context(), "turn-token", id, "continue assessment", func(event Event) error {
+	requestID, err := client.SendConversationTurn(t.Context(), testCredential("turn-token"), id, "continue assessment", func(event Event) error {
 		events = append(events, event)
 		return nil
 	})
@@ -153,7 +153,7 @@ func TestClientUpdatesConversationTitle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
-	got, err := client.UpdateConversationTitle(t.Context(), "token", id, "  Renamed\nconversation  ")
+	got, err := client.UpdateConversationTitle(t.Context(), testCredential("token"), id, "  Renamed\nconversation  ")
 	if err != nil {
 		t.Fatalf("update conversation title: %v", err)
 	}
@@ -196,14 +196,14 @@ func TestClientGetsAndDeletesConversation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
-	got, err := client.GetConversation(t.Context(), "token", id)
+	got, err := client.GetConversation(t.Context(), testCredential("token"), id)
 	if err != nil {
 		t.Fatalf("get conversation: %v", err)
 	}
 	if got != item {
 		t.Fatalf("conversation = %#v, want %#v", got, item)
 	}
-	if err := client.DeleteConversation(t.Context(), "token", id); err != nil {
+	if err := client.DeleteConversation(t.Context(), testCredential("token"), id); err != nil {
 		t.Fatalf("delete conversation: %v", err)
 	}
 	if deleteCalls.Load() != 1 {
@@ -222,28 +222,28 @@ func TestConversationMethodsRejectInvalidInputBeforeRequest(t *testing.T) {
 		t.Fatalf("new client: %v", err)
 	}
 
-	if _, err := client.ListConversations(t.Context(), " "); err == nil {
+	if _, err := client.ListConversations(t.Context(), testCredential(" ")); err == nil {
 		t.Fatal("list accepted an empty token")
 	}
-	if _, err := client.CreateConversation(t.Context(), " "); err == nil {
+	if _, err := client.CreateConversation(t.Context(), testCredential(" ")); err == nil {
 		t.Fatal("create accepted an empty token")
 	}
 	for _, title := range []string{" \n ", strings.Repeat("a", maxConversationTitleRunes+1)} {
-		if _, err := client.UpdateConversationTitle(t.Context(), "token", "conversation-1", title); err == nil {
+		if _, err := client.UpdateConversationTitle(t.Context(), testCredential("token"), "conversation-1", title); err == nil {
 			t.Errorf("update accepted title %q", title)
 		}
 	}
 	for _, id := range []string{"", "bad/id", "bad id", strings.Repeat("a", maxConversationIDBytes+1)} {
-		if _, err := client.GetConversation(t.Context(), "token", id); err == nil {
+		if _, err := client.GetConversation(t.Context(), testCredential("token"), id); err == nil {
 			t.Errorf("get accepted ID %q", id)
 		}
-		if err := client.DeleteConversation(t.Context(), "token", id); err == nil {
+		if err := client.DeleteConversation(t.Context(), testCredential("token"), id); err == nil {
 			t.Errorf("delete accepted ID %q", id)
 		}
-		if _, err := client.SendConversationTurn(t.Context(), "token", id, "prompt", func(Event) error { return nil }); err == nil {
+		if _, err := client.SendConversationTurn(t.Context(), testCredential("token"), id, "prompt", func(Event) error { return nil }); err == nil {
 			t.Errorf("turn accepted ID %q", id)
 		}
-		if _, err := client.UpdateConversationTitle(t.Context(), "token", id, "valid"); err == nil {
+		if _, err := client.UpdateConversationTitle(t.Context(), testCredential("token"), id, "valid"); err == nil {
 			t.Errorf("update accepted ID %q", id)
 		}
 	}
@@ -265,7 +265,7 @@ func TestConversationMethodsReturnSanitizedAPIErrors(t *testing.T) {
 		t.Fatalf("new client: %v", err)
 	}
 
-	_, err = client.GetConversation(t.Context(), token, "conversation-1")
+	_, err = client.GetConversation(t.Context(), testCredential(token), "conversation-1")
 	var apiError *APIError
 	if !errors.As(err, &apiError) || apiError.StatusCode != http.StatusNotFound || apiError.Code != "conversation_not_found" || apiError.RequestID != "request-error" {
 		t.Fatalf("API error = %#v, %v", apiError, err)
@@ -273,10 +273,10 @@ func TestConversationMethodsReturnSanitizedAPIErrors(t *testing.T) {
 	if strings.Contains(err.Error(), token) || !strings.Contains(err.Error(), "[redacted]") {
 		t.Fatalf("error = %q", err)
 	}
-	if err := client.DeleteConversation(t.Context(), token, "conversation-1"); err == nil || strings.Contains(err.Error(), token) {
+	if err := client.DeleteConversation(t.Context(), testCredential(token), "conversation-1"); err == nil || strings.Contains(err.Error(), token) {
 		t.Fatalf("delete error = %v", err)
 	}
-	if _, err := client.UpdateConversationTitle(t.Context(), token, "conversation-1", "valid"); err == nil || strings.Contains(err.Error(), token) {
+	if _, err := client.UpdateConversationTitle(t.Context(), testCredential(token), "conversation-1", "valid"); err == nil || strings.Contains(err.Error(), token) {
 		t.Fatalf("update error = %v", err)
 	}
 }
@@ -310,7 +310,7 @@ func TestClientRejectsInvalidConversationResponses(t *testing.T) {
 			if err != nil {
 				t.Fatalf("new client: %v", err)
 			}
-			if _, err := client.ListConversations(t.Context(), "token"); err == nil {
+			if _, err := client.ListConversations(t.Context(), testCredential("token")); err == nil {
 				t.Fatal("invalid response succeeded")
 			}
 		})
@@ -327,7 +327,7 @@ func TestClientRejectsMismatchedConversationID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
-	if _, err := client.GetConversation(t.Context(), "token", "conversation-1"); err == nil {
+	if _, err := client.GetConversation(t.Context(), testCredential("token"), "conversation-1"); err == nil {
 		t.Fatal("mismatched conversation ID succeeded")
 	}
 }
@@ -344,7 +344,7 @@ func TestClientRejectsMismatchedConversationTitle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new client: %v", err)
 	}
-	if _, err := client.UpdateConversationTitle(t.Context(), "token", item.ID, "Expected title"); err == nil {
+	if _, err := client.UpdateConversationTitle(t.Context(), testCredential("token"), item.ID, "Expected title"); err == nil {
 		t.Fatal("mismatched conversation title succeeded")
 	}
 }

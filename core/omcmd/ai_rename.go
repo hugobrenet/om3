@@ -29,12 +29,12 @@ func (t *CmdAIRename) run(parent context.Context) error {
 	if strings.TrimSpace(t.Title) == "" {
 		return fmt.Errorf("conversation title is empty")
 	}
-	ctx, cancel, token, client, err := t.prepare(parent)
+	ctx, cancel, cred, client, err := t.prepare(parent)
 	if err != nil {
 		return err
 	}
 	defer cancel()
-	item, err := client.UpdateConversationTitle(ctx, token, t.ID, t.Title)
+	item, err := client.UpdateConversationTitle(ctx, cred, t.ID, t.Title)
 	if err != nil {
 		return err
 	}
