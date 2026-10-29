@@ -11,4 +11,7 @@ its own catalogue, and a token the agent refuses is answered 502
 ai_token_rejected, the catalogue to check. The agent, not the listener,
 ends a run at the expiry of its token.
 
-Empty, /api/ai/ answers 404.
+Empty, /api/ai/ answers 404, and om3-webapp offers no assistant. The webapp
+asks once per sign-in whether the cluster has an agent: one set, or removed,
+while a user is signed in shows in the webapp of that user at their next
+sign-in.
