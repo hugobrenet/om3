@@ -762,6 +762,12 @@ var (
 		Since:     "v3.0.0-rc44",
 		Text:      keywords.NewText(fs, "text/kw/node/listener.acme_port"),
 	}
+	kwNodeListenerAIAgentURL = keywords.Keyword{
+		Example: "https://ai.opensvc.com:8090",
+		Option:  "ai_agent_url",
+		Section: "listener",
+		Text:    keywords.NewText(fs, "text/kw/node/listener.ai_agent_url"),
+	}
 	kwNodeListenerRateLimiterRate = keywords.Keyword{
 		Default:   "20",
 		Converter: converters.Int,
@@ -2098,6 +2104,7 @@ var (
 		&kwNodeListenerRateLimiterExpires,
 		&kwNodeListenerTLSSecs,
 		&kwNodeListenerACMEPort,
+		&kwNodeListenerAIAgentURL,
 		&kwNodeSyslogFacility,
 		&kwNodeSyslogLevel,
 		&kwNodeSyslogHost,

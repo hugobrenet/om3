@@ -93,6 +93,8 @@ func New(ctx context.Context, enableUI bool) *T {
 	e.Use(daemonapi.LogUserMiddleware(ctx))
 	e.Use(daemonapi.LogRequestMiddleWare(ctx))
 	api.RegisterHandlers(e, daemonapi.New(ctx))
+	// The AI agent, relayed from the origin of the webapp.
+	e.Any(aiProxyPrefix+"*", aiProxy)
 
 	return &T{mux: e}
 }

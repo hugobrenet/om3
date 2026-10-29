@@ -62,6 +62,10 @@ type (
 		// challenges on, none when zero.
 		ACMEPort int `json:"acme_port"`
 
+		// AIAgentURL is the origin of the OpenSVC AI agent the listener
+		// relays /api/ai/ to, none when empty.
+		AIAgentURL string `json:"ai_agent_url"`
+
 		// UXOwnerGroup is the group owning the user socket, whose
 		// members reach the api as themselves. Empty, the node serves
 		// no user socket.

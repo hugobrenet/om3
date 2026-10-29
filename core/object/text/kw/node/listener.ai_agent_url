@@ -1,0 +1,14 @@
+The origin of the OpenSVC AI agent, such as https://ai.opensvc.com:8090,
+which the listener relays /api/ai/ to, so that om3-webapp reaches the agent
+from its own origin, without CORS. Set it in the cluster configuration, to
+the address of the agent that every node reaches, such as the name of its
+VIP: the listener of any node relays to it.
+
+The listener accepts there the OpenID tokens only, and passes each
+unchanged, with the cluster id in X-OpenSVC-Cluster-ID: the agent verifies
+the token again, through om3-mcp, against the issuer and the audience of
+its own catalogue, and a token the agent refuses is answered 502
+ai_token_rejected, the catalogue to check. The agent, not the listener,
+ends a run at the expiry of its token.
+
+Empty, /api/ai/ answers 404.
