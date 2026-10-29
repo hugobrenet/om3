@@ -171,7 +171,13 @@ func aiReverseProxy(target *url.URL) *httputil.ReverseProxy {
 				// against the issuer and the audience of the om3-mcp
 				// catalogue, which differ. A 401 would send the webapp
 				// to sign in again, in a loop.
-				return aiTokenRejected(response)
+				return replaceAIResponse(response, "ai_token_rejected", "the daemon accepts this token, the AI agent refuses it: check the OpenID issuer and audience of this cluster in the om3-mcp catalogue")
+			}
+			if response.StatusCode >= 300 && response.StatusCode < 400 && response.StatusCode != http.StatusNotModified {
+				// The agent serves no redirect: followed, its location
+				// would leave the relay, at the root of the listener or
+				// at the origin of the agent.
+				return replaceAIResponse(response, "ai_agent_redirect", fmt.Sprintf("the AI agent answered %d, a redirect the relay does not follow", response.StatusCode))
 			}
 			return nil
 		},
@@ -187,12 +193,12 @@ func aiReverseProxy(target *url.URL) *httputil.ReverseProxy {
 	return actual.(*httputil.ReverseProxy)
 }
 
-// aiTokenRejected replaces the 401 of the agent on a token the daemon
-// accepted by a 502 naming where the two differ.
-func aiTokenRejected(response *http.Response) error {
+// replaceAIResponse replaces an answer of the agent the relay does not pass
+// on, its headers and body dropped, by a 502 with an error of its own.
+func replaceAIResponse(response *http.Response, code, message string) error {
 	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
 	_ = response.Body.Close()
-	body, err := json.Marshal(aiProxyErrorBody("ai_token_rejected", "the daemon accepts this token, the AI agent refuses it: check the OpenID issuer and audience of this cluster in the om3-mcp catalogue"))
+	body, err := json.Marshal(aiProxyErrorBody(code, message))
 	if err != nil {
 		return err
 	}

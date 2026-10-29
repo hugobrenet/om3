@@ -142,6 +142,26 @@ func TestAIProxyTurnsAnAgentRefusalIntoTokenRejected(t *testing.T) {
 	assert.Equal(t, "ai_token_rejected", aiErrorCode(t, response))
 }
 
+// A redirect of the agent is not passed on: its location would leave the
+// relay, at the root of the listener or at the origin of the agent.
+func TestAIProxyRefusesTheRedirectsOfTheAgent(t *testing.T) {
+	for _, location := range []string{"/v1/om3/conversations", "https://agent.internal:8090/v1/om3/conversations"} {
+		agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, location, http.StatusFound)
+		}))
+		server := newAIProxyServer(t, agent.URL, daemonauth.StrategyJWTOpenID)
+		client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+
+		response, err := client.Get(server.URL + "/api/ai/conversations")
+		require.NoError(t, err, location)
+		assert.Equal(t, http.StatusBadGateway, response.StatusCode, location)
+		assert.Empty(t, response.Header.Get("Location"), location)
+		assert.Equal(t, "ai_agent_redirect", aiErrorCode(t, response), location)
+		_ = response.Body.Close()
+		agent.Close()
+	}
+}
+
 func TestAIProxyRefusals(t *testing.T) {
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("the agent was called for %s", r.URL)
