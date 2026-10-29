@@ -194,9 +194,9 @@ func aiReverseProxy(target *url.URL) *httputil.ReverseProxy {
 }
 
 // replaceAIResponse replaces an answer of the agent the relay does not pass
-// on, its headers and body dropped, by a 502 with an error of its own.
+// on, its headers and body dropped, by a 502 with an error of its own. The
+// body is closed unread: one the agent keeps open would hold the request.
 func replaceAIResponse(response *http.Response, code, message string) error {
-	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 64<<10))
 	_ = response.Body.Close()
 	body, err := json.Marshal(aiProxyErrorBody(code, message))
 	if err != nil {

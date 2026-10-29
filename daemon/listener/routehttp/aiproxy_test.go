@@ -162,6 +162,37 @@ func TestAIProxyRefusesTheRedirectsOfTheAgent(t *testing.T) {
 	}
 }
 
+// An answer replaced is not read: a body the agent keeps open does not hold
+// the request.
+func TestAIProxyReplacesAnAnswerWhoseBodyStaysOpen(t *testing.T) {
+	for status, code := range map[int]string{http.StatusFound: "ai_agent_redirect", http.StatusUnauthorized: "ai_token_rejected"} {
+		done := make(chan struct{})
+		agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Location", "/v1/om3/conversations")
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte("partial"))
+			w.(http.Flusher).Flush()
+			select {
+			case <-done:
+			case <-r.Context().Done():
+			}
+		}))
+		server := newAIProxyServer(t, agent.URL, daemonauth.StrategyJWTOpenID)
+		client := &http.Client{
+			Timeout:       5 * time.Second,
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		}
+
+		response, err := client.Get(server.URL + "/api/ai/conversations")
+		require.NoError(t, err, code)
+		assert.Equal(t, http.StatusBadGateway, response.StatusCode, code)
+		assert.Equal(t, code, aiErrorCode(t, response), code)
+		_ = response.Body.Close()
+		close(done)
+		agent.Close()
+	}
+}
+
 func TestAIProxyRefusals(t *testing.T) {
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Errorf("the agent was called for %s", r.URL)
