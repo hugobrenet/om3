@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/opensvc/om3/v3/core/cluster"
 	"github.com/opensvc/om3/v3/core/keywords"
 	"github.com/opensvc/om3/v3/core/kwoption"
 	"github.com/opensvc/om3/v3/core/naming"
@@ -763,10 +764,12 @@ var (
 		Text:      keywords.NewText(fs, "text/kw/node/listener.acme_port"),
 	}
 	kwNodeListenerAIAgentURL = keywords.Keyword{
-		Example: "https://ai.opensvc.com:8090",
-		Option:  "ai_agent_url",
-		Section: "listener",
-		Text:    keywords.NewText(fs, "text/kw/node/listener.ai_agent_url"),
+		Example:  "https://ai.opensvc.com:8090",
+		Option:   "ai_agent_url",
+		Section:  "listener",
+		Since:    "v3.0.0-rc55",
+		Text:     keywords.NewText(fs, "text/kw/node/listener.ai_agent_url"),
+		Validate: validAIAgentURL,
 	}
 	kwNodeListenerRateLimiterRate = keywords.Keyword{
 		Default:   "20",
@@ -2286,6 +2289,13 @@ func validMaxParallel(value string) error {
 		return fmt.Errorf("%d is below the minimum of %d actions in parallel, 0 being the number of cpus", i, MinNodeMaxParallel)
 	}
 	return nil
+}
+
+// validAIAgentURL refuses a listener.ai_agent_url the listener would not relay
+// to: no origin, or plain http to an address not loopback.
+func validAIAgentURL(value string) error {
+	_, err := cluster.ParseAIAgentURL(value)
+	return err
 }
 
 func validShare(value string) error {

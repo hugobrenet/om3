@@ -2,7 +2,8 @@ The origin of the OpenSVC AI agent, such as https://ai.opensvc.com:8090,
 which the listener relays /api/ai/ to, so that om3-webapp reaches the agent
 from its own origin, without CORS. Set it in the cluster configuration, to
 the address of the agent that every node reaches, such as the name of its
-VIP: the listener of any node relays to it.
+VIP: the listener of any node relays to it. It is an https origin, or http
+to a loopback address only: another value is refused when written.
 
 The listener checks the certificate of the agent against the authorities of
 the system, for a public certificate, and those of the cluster, the cluster
