@@ -164,6 +164,12 @@ func getClusterConfig() (*cluster.Config, error) {
 	cfg.Listener.TLSSecs = c.GetStrings(keyListenerTLSSecs)
 	cfg.Listener.ACMEPort = c.GetInt(keyListenerACMEPort)
 	cfg.Listener.AIAgentURL = c.GetString(keyListenerAIAgentURL)
+	if cfg.Listener.AIAgentURL != "" {
+		// The relay checks it again at each request.
+		if _, err := cluster.ParseAIAgentURL(cfg.Listener.AIAgentURL); err != nil {
+			cfg.Issues = append(cfg.Issues, fmt.Sprintf("listener ai_agent_url: %s", err))
+		}
+	}
 
 	if homedir, err := os.UserHomeDir(); err != nil {
 		cfg.Issues = append(cfg.Issues, fmt.Sprintf("user home dir: %s", err))

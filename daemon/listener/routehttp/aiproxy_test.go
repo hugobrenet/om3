@@ -84,7 +84,10 @@ func TestAIProxyRelaysToTheOm3BackendWithTheClusterID(t *testing.T) {
 
 func TestAIProxyStreamsAnEventBeforeTheRunEnds(t *testing.T) {
 	release := make(chan struct{})
+	received := make(chan string, 1)
 	agent := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		received <- string(body) + "|" + r.Header.Get("Last-Event-Id") + "|" + r.Header.Get("Accept-Encoding")
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = fmt.Fprint(w, "data: {\"type\":\"RUN_STARTED\"}\n\n")
 		w.(http.Flusher).Flush()
@@ -97,8 +100,9 @@ func TestAIProxyStreamsAnEventBeforeTheRunEnds(t *testing.T) {
 	defer close(release)
 	server := newAIProxyServer(t, agent.URL, daemonauth.StrategyJWTOpenID)
 
-	request, _ := http.NewRequest(http.MethodPost, server.URL+"/api/ai/conversations/c1/runs", strings.NewReader("{}"))
+	request, _ := http.NewRequest(http.MethodPost, server.URL+"/api/ai/conversations/c1/runs", strings.NewReader(`{"threadId":"c1"}`))
 	request.Header.Set("Accept", "text/event-stream")
+	request.Header.Set("Last-Event-Id", "7")
 	response, err := http.DefaultClient.Do(request)
 	require.NoError(t, err)
 	defer response.Body.Close()
@@ -114,6 +118,9 @@ func TestAIProxyStreamsAnEventBeforeTheRunEnds(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the event was held until the run ends")
 	}
+	// The body and the event id reach the agent, and no compression is
+	// asked of it on the client's behalf.
+	assert.Equal(t, `{"threadId":"c1"}|7|`, <-received)
 }
 
 func TestAIProxyTurnsAnAgentRefusalIntoTokenRejected(t *testing.T) {
@@ -165,24 +172,4 @@ func TestAIProxyRefusals(t *testing.T) {
 			assert.Equal(t, tc.code, aiErrorCode(t, response))
 		})
 	}
-}
-
-func TestAIAgentOrigin(t *testing.T) {
-	for value, want := range map[string]string{
-		"https://ai.opensvc.com:8090":  "https://ai.opensvc.com:8090",
-		"https://ai.opensvc.com:8090/": "https://ai.opensvc.com:8090",
-		"http://127.0.0.1:8090":        "http://127.0.0.1:8090",
-		"http://[::1]:8090":            "http://[::1]:8090",
-		"http://localhost:8090":        "http://localhost:8090",
-	} {
-		u, err := aiAgentOrigin(value)
-		if assert.NoError(t, err, value) {
-			assert.Equal(t, want, u.String(), value)
-		}
-	}
-	for _, value := range []string{"http://ai.opensvc.com:8090", "https://u:p@ai.opensvc.com", "https://ai.opensvc.com/v1", "https://ai.opensvc.com?x=1", "ai.opensvc.com:8090", "ftp://ai.opensvc.com"} {
-		_, err := aiAgentOrigin(value)
-		assert.Error(t, err, value)
-	}
-	_ = io.Discard
 }

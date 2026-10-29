@@ -42,6 +42,9 @@ var aiProxyTransport = &http.Transport{
 	ResponseHeaderTimeout: 60 * time.Second,
 	IdleConnTimeout:       90 * time.Second,
 	ForceAttemptHTTP2:     true,
+	// The bytes of the agent are relayed as they come, a run streamed: no
+	// compression asked on the client's behalf.
+	DisableCompression: true,
 }
 
 // aiProxies keeps one reverse proxy per agent origin, the origin read from
@@ -59,7 +62,7 @@ func aiProxy(c echo.Context) error {
 	if config == nil || config.Listener.AIAgentURL == "" {
 		return aiProxyError(c, http.StatusNotFound, "ai_not_configured", "no AI agent is configured on this cluster: set listener.ai_agent_url in the cluster configuration")
 	}
-	target, err := aiAgentOrigin(config.Listener.AIAgentURL)
+	target, err := cluster.ParseAIAgentURL(config.Listener.AIAgentURL)
 	if err != nil {
 		return aiProxyError(c, http.StatusInternalServerError, "ai_misconfigured", fmt.Sprintf("listener.ai_agent_url: %s", err))
 	}
@@ -88,32 +91,6 @@ func aiProxy(c echo.Context) error {
 	request.Header = header
 	aiReverseProxy(target).ServeHTTP(c.Response(), request)
 	return nil
-}
-
-// aiAgentOrigin reads listener.ai_agent_url: an https origin, or http to a
-// loopback address, without credentials, path, query or fragment.
-func aiAgentOrigin(value string) (*url.URL, error) {
-	u, err := url.Parse(strings.TrimSpace(value))
-	if err != nil {
-		return nil, err
-	}
-	switch {
-	case u.Host == "" || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "":
-		return nil, fmt.Errorf("%q is no origin: give the scheme, the host and the port only", value)
-	case u.Scheme == "https":
-	case u.Scheme == "http" && isLoopback(u.Hostname()):
-	default:
-		return nil, fmt.Errorf("%q: https is required, http only to a loopback address", value)
-	}
-	return &url.URL{Scheme: u.Scheme, Host: u.Host}, nil
-}
-
-func isLoopback(host string) bool {
-	if host == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }
 
 // aiProxyPath gives the path under /v1/om3/ a client asked, decoded as the
