@@ -4,6 +4,10 @@ from its own origin, without CORS. Set it in the cluster configuration, to
 the address of the agent that every node reaches, such as the name of its
 VIP: the listener of any node relays to it.
 
+The listener checks the certificate of the agent against the authorities of
+the system, for a public certificate, and those of the cluster, the cluster
+`ca` and `ca_sec_paths`, for a certificate a sec signed with the cluster CA.
+
 The listener accepts there the OpenID tokens only, and passes each
 unchanged, with the cluster id in X-OpenSVC-Cluster-ID: the agent verifies
 the token again, through om3-mcp, against the issuer and the audience of

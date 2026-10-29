@@ -1,6 +1,8 @@
 package routehttp
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -18,6 +21,7 @@ import (
 
 	"github.com/opensvc/om3/v3/core/cluster"
 	"github.com/opensvc/om3/v3/daemon/daemonauth"
+	"github.com/opensvc/om3/v3/daemon/daemonenv"
 )
 
 const (
@@ -33,23 +37,53 @@ const (
 // never the client's.
 var aiProxyHeaders = []string{"Authorization", "Content-Type", "Accept", "Last-Event-Id"}
 
-// aiProxyTransport reaches the agent: the system roots, bounded connection
-// setup, and no bound on a body, which streams a run.
-var aiProxyTransport = &http.Transport{
-	Proxy:                 nil,
-	DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
-	TLSHandshakeTimeout:   10 * time.Second,
-	ResponseHeaderTimeout: 60 * time.Second,
-	IdleConnTimeout:       90 * time.Second,
-	ForceAttemptHTTP2:     true,
-	// The bytes of the agent are relayed as they come, a run streamed: no
-	// compression asked on the client's behalf.
-	DisableCompression: true,
+// newAIProxyTransport reaches the agent: the authorities given, bounded
+// connection setup, and no bound on a body, which streams a run.
+func newAIProxyTransport(roots *x509.CertPool) *http.Transport {
+	return &http.Transport{
+		Proxy:                 nil,
+		DialContext:           (&net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		TLSClientConfig:       &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots},
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 60 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
+		ForceAttemptHTTP2:     true,
+		// The bytes of the agent are relayed as they come, a run streamed: no
+		// compression asked on the client's behalf.
+		DisableCompression: true,
+	}
 }
 
-// aiProxies keeps one reverse proxy per agent origin, the origin read from
-// the cluster configuration at each request: a change applies at once.
+// aiProxies keeps one reverse proxy per agent origin and state of the
+// authorities of the cluster, both read at each request: a change of the
+// configuration, or of the authorities installed, applies at once.
 var aiProxies sync.Map
+
+// aiAgentAuthorities tells the state of the authorities of the cluster the
+// listener installs, ca_certificates, by its time and size, empty without it.
+func aiAgentAuthorities() string {
+	info, err := os.Stat(daemonenv.CAsCertFile())
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("%d-%d", info.ModTime().UnixNano(), info.Size())
+}
+
+// aiAgentRootCAs are the authorities the certificate of the agent is checked
+// against: those of the system, as for an agent with a public certificate,
+// and those of the cluster, the cluster ca and ca_sec_paths, as for an agent
+// whose certificate a sec signed with the cluster CA, as the other clients of
+// the daemon trust the nodes.
+func aiAgentRootCAs() *x509.CertPool {
+	pool, err := x509.SystemCertPool()
+	if err != nil {
+		pool = x509.NewCertPool()
+	}
+	if b, err := os.ReadFile(daemonenv.CAsCertFile()); err == nil {
+		pool.AppendCertsFromPEM(b)
+	}
+	return pool
+}
 
 // aiProxy relays /api/ai/<path> to the om3 backend of the AI agent the
 // cluster configuration names, listener.ai_agent_url, so that om3-webapp
@@ -113,7 +147,8 @@ func aiProxyPath(raw string) (string, bool) {
 }
 
 func aiReverseProxy(target *url.URL) *httputil.ReverseProxy {
-	if proxy, ok := aiProxies.Load(target.String()); ok {
+	key := target.String() + " " + aiAgentAuthorities()
+	if proxy, ok := aiProxies.Load(key); ok {
 		return proxy.(*httputil.ReverseProxy)
 	}
 	proxy := &httputil.ReverseProxy{
@@ -121,7 +156,7 @@ func aiReverseProxy(target *url.URL) *httputil.ReverseProxy {
 			r.SetURL(target)
 			r.Out.Host = target.Host
 		},
-		Transport: aiProxyTransport,
+		Transport: newAIProxyTransport(aiAgentRootCAs()),
 		// A run streams its events: each is written as it comes.
 		FlushInterval: -1,
 		ModifyResponse: func(response *http.Response) error {
@@ -148,7 +183,7 @@ func aiReverseProxy(target *url.URL) *httputil.ReverseProxy {
 			writeAIProxyError(w, http.StatusBadGateway, "ai_agent_unavailable", fmt.Sprintf("the AI agent %s did not answer: %s", target.Host, err))
 		},
 	}
-	actual, _ := aiProxies.LoadOrStore(target.String(), proxy)
+	actual, _ := aiProxies.LoadOrStore(key, proxy)
 	return actual.(*httputil.ReverseProxy)
 }
 

@@ -3,10 +3,13 @@ package routehttp
 import (
 	"bufio"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/opensvc/om3/v3/core/cluster"
+	"github.com/opensvc/om3/v3/core/rawconfig"
 	"github.com/opensvc/om3/v3/daemon/daemonauth"
 )
 
@@ -172,4 +176,32 @@ func TestAIProxyRefusals(t *testing.T) {
 			assert.Equal(t, tc.code, aiErrorCode(t, response))
 		})
 	}
+}
+
+// An agent whose certificate the authorities of the cluster sign is relayed
+// to once they are installed, ca_certificates, as the listener installs them;
+// without them, the certificate is unknown and the agent unavailable.
+func TestAIProxyTrustsTheAuthoritiesOfTheCluster(t *testing.T) {
+	agent := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"backend":"om3"}`))
+	}))
+	defer agent.Close()
+	certs := rawconfig.Paths.Certs
+	t.Cleanup(func() { rawconfig.Paths.Certs = certs })
+	rawconfig.Paths.Certs = t.TempDir()
+	server := newAIProxyServer(t, agent.URL, daemonauth.StrategyJWTOpenID)
+
+	response, err := http.Get(server.URL + "/api/ai/capabilities")
+	require.NoError(t, err)
+	assert.Equal(t, http.StatusBadGateway, response.StatusCode)
+	assert.Equal(t, "ai_agent_unavailable", aiErrorCode(t, response))
+	_ = response.Body.Close()
+
+	authority := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: agent.Certificate().Raw})
+	require.NoError(t, os.WriteFile(filepath.Join(rawconfig.Paths.Certs, "ca_certificates"), authority, 0o600))
+	response, err = http.Get(server.URL + "/api/ai/capabilities")
+	require.NoError(t, err)
+	defer response.Body.Close()
+	assert.Equal(t, http.StatusOK, response.StatusCode, "the authorities installed apply at once")
 }
